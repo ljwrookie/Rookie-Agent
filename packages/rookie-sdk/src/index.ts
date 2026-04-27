@@ -82,9 +82,14 @@ export {
 } from "./tools/executor.js";
 // B4: File snapshot manager for undo/rollback
 export {
-  SnapshotManager,
-  type FileSnapshot, type SnapshotManagerOptions,
-  getSnapshotManager, initSnapshotManager,
+  saveSnapshot,
+  restoreSnapshot,
+  listSnapshots,
+  getSnapshot,
+  checkFileModified,
+  getSnapshotDir,
+  type FileSnapshot,
+  type SnapshotMetadata,
 } from "./tools/snapshot.js";
 // B5: Shell sandbox adapter
 export {

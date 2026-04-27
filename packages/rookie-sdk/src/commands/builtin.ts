@@ -309,35 +309,34 @@ export const DEFAULT_COMMANDS: SlashCommand[] = [
   mk({
     name: "undo",
     description: "Restore a file from snapshot history",
-    usage: "/undo [<snapshot-id>] [file-path]",
+    usage: "/undo [<snapshot-id>]",
     paramsHint: "Without args: list recent snapshots. With snapshot-id: restore that snapshot.",
     category: "workflow",
     handler: async (ctx) => {
-      const { getSnapshotManager } = await import("../tools/snapshot.js");
-      const snapshotManager = getSnapshotManager();
+      const { listSnapshots, restoreSnapshot } = await import("../tools/snapshot.js");
+      const projectRoot = ctx.meta?.projectRoot as string | undefined ?? process.cwd();
 
       // No args: list snapshots
       if (ctx.args.length === 0) {
-        const snapshots = await snapshotManager.listAllSnapshots();
+        const snapshots = await listSnapshots(projectRoot);
         if (snapshots.length === 0) {
           return { systemMessage: "No snapshots found. Snapshots are created automatically when editing files." };
         }
         const lines = snapshots.slice(0, 20).map((s, i) => {
           const time = new Date(s.timestamp).toLocaleString();
-          const reason = s.reason || "edit";
-          return `${i + 1}. ${s.id} — ${s.path} (${reason}) at ${time}`;
+          return `${i + 1}. ${s.id} — ${s.filePath} at ${time}`;
         });
-        return { systemMessage: `Recent snapshots:\n${lines.join("\n")}` };
+        return { systemMessage: `Recent snapshots (newest first):\n${lines.join("\n")}` };
       }
 
       // With args: restore snapshot
       const snapshotId = ctx.args[0];
-      const success = await snapshotManager.restoreSnapshot(snapshotId);
+      const success = await restoreSnapshot(projectRoot, snapshotId);
 
       if (success) {
         return { systemMessage: `Restored snapshot ${snapshotId}` };
       } else {
-        return { systemMessage: `[ERROR] Snapshot not found: ${snapshotId}` };
+        return { systemMessage: `[ERROR] Snapshot not found or restore failed: ${snapshotId}` };
       }
     },
   }),

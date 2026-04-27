@@ -1,251 +1,228 @@
-// ─── File Snapshot Manager ───────────────────────────────────────
-// B4: File history snapshots for undo/rollback
+// B4: File history snapshot system
+// Tracks file edits and allows undoing changes
 
-import { promises as fs, constants as fsConstants } from "fs";
+import { readFile, writeFile, mkdir, readdir, stat, unlink } from "fs/promises";
+import { join, dirname } from "path";
 import { createHash } from "crypto";
-import { dirname, join, relative, resolve } from "path";
 
-// B4: Snapshot metadata
+const MAX_SNAPSHOTS = 100;
+const SNAPSHOT_DIR = ".rookie/history";
+
 export interface FileSnapshot {
-  id: string;              // hash of content
-  timestamp: number;       // creation time
-  path: string;            // original file path
-  content: string;         // file content at snapshot time
-  mtime: number;           // file mtime at snapshot time
-  size: number;            // file size
-  reason: "edit" | "write" | "delete";  // why snapshot was created
+  id: string;
+  filePath: string;
+  content: string;
+  timestamp: number;
+  mtime: number;
+  size: number;
 }
 
-// B4: Snapshot manager options
-export interface SnapshotManagerOptions {
-  projectRoot: string;
-  maxSnapshots?: number;   // max snapshots to keep per file (default 100)
+export interface SnapshotMetadata {
+  id: string;
+  filePath: string;
+  timestamp: number;
+  mtime: number;
+  size: number;
+  hash: string;
 }
 
-// B4: Snapshot manager
-export class SnapshotManager {
-  private projectRoot: string;
-  private maxSnapshots: number;
-  private historyDir: string;
+/**
+ * Generate a unique snapshot ID based on file path and timestamp.
+ */
+function generateSnapshotId(filePath: string, timestamp: number): string {
+  const hash = createHash("sha256")
+    .update(`${filePath}:${timestamp}`)
+    .digest("hex")
+    .slice(0, 16);
+  return hash;
+}
 
-  constructor(options: SnapshotManagerOptions) {
-    this.projectRoot = resolve(options.projectRoot);
-    this.maxSnapshots = options.maxSnapshots ?? 100;
-    this.historyDir = join(this.projectRoot, ".rookie", "history");
-  }
+/**
+ * Get the snapshot directory path for a project.
+ */
+export function getSnapshotDir(projectRoot: string): string {
+  return join(projectRoot, SNAPSHOT_DIR);
+}
 
-  // B4: Initialize history directory
-  async init(): Promise<void> {
-    await fs.mkdir(this.historyDir, { recursive: true });
-  }
+/**
+ * Ensure the snapshot directory exists.
+ */
+async function ensureSnapshotDir(projectRoot: string): Promise<void> {
+  const dir = getSnapshotDir(projectRoot);
+  await mkdir(dir, { recursive: true });
+}
 
-  // B4: Create snapshot before file modification
-  async createSnapshot(
-    filePath: string,
-    reason: "edit" | "write" | "delete" = "edit"
-  ): Promise<FileSnapshot | null> {
-    const resolvedPath = resolve(this.projectRoot, filePath);
+/**
+ * Save a snapshot of a file before editing.
+ * Returns the snapshot ID.
+ */
+export async function saveSnapshot(
+  projectRoot: string,
+  filePath: string
+): Promise<string | null> {
+  try {
+    await ensureSnapshotDir(projectRoot);
 
-    // Check if file exists
-    try {
-      await fs.access(resolvedPath, fsConstants.F_OK);
-    } catch {
-      // File doesn't exist, nothing to snapshot
-      return null;
-    }
-
-    // Read file content and stats
-    const [content, stats] = await Promise.all([
-      fs.readFile(resolvedPath, "utf-8"),
-      fs.stat(resolvedPath),
-    ]);
-
-    // Generate snapshot ID from content hash
-    const id = createHash("sha256").update(content).digest("hex").slice(0, 16);
+    const content = await readFile(filePath, "utf-8");
+    const stats = await stat(filePath);
+    const timestamp = Date.now();
+    const id = generateSnapshotId(filePath, timestamp);
 
     const snapshot: FileSnapshot = {
       id,
-      timestamp: Date.now(),
-      path: relative(this.projectRoot, resolvedPath),
+      filePath,
       content,
-      mtime: stats.mtime.getTime(),
+      timestamp,
+      mtime: stats.mtimeMs,
       size: stats.size,
-      reason,
     };
 
-    // Save snapshot to disk
-    await this.saveSnapshot(snapshot);
+    const snapshotPath = join(getSnapshotDir(projectRoot), `${id}.json`);
+    await writeFile(snapshotPath, JSON.stringify(snapshot, null, 2), "utf-8");
 
-    // Cleanup old snapshots for this file
-    await this.cleanupOldSnapshots(snapshot.path);
+    // Clean up old snapshots if exceeding MAX_SNAPSHOTS
+    await cleanupOldSnapshots(projectRoot);
 
-    return snapshot;
-  }
-
-  // B4: Save snapshot to disk
-  private async saveSnapshot(snapshot: FileSnapshot): Promise<void> {
-    const fileName = `${snapshot.id}_${snapshot.timestamp}.snapshot`;
-    const filePath = join(this.historyDir, fileName);
-
-    await fs.writeFile(filePath, JSON.stringify(snapshot, null, 2), "utf-8");
-  }
-
-  // B4: Get all snapshots for a file
-  async getSnapshotsForFile(filePath: string): Promise<FileSnapshot[]> {
-    const normalizedPath = relative(this.projectRoot, resolve(this.projectRoot, filePath));
-
-    const files = await fs.readdir(this.historyDir).catch(() => [] as string[]);
-    const snapshots: FileSnapshot[] = [];
-
-    for (const file of files) {
-      if (!file.endsWith(".snapshot")) continue;
-
-      try {
-        const content = await fs.readFile(join(this.historyDir, file), "utf-8");
-        const snapshot: FileSnapshot = JSON.parse(content);
-
-        if (snapshot.path === normalizedPath) {
-          snapshots.push(snapshot);
-        }
-      } catch {
-        // Skip invalid snapshots
-      }
+    return id;
+  } catch (error) {
+    // File might not exist (new file), that's okay
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return null;
     }
-
-    // Sort by timestamp descending (newest first)
-    return snapshots.sort((a, b) => b.timestamp - a.timestamp);
+    throw error;
   }
+}
 
-  // B4: Restore file to snapshot
-  async restoreSnapshot(snapshotId: string): Promise<boolean> {
-    const files = await fs.readdir(this.historyDir).catch(() => [] as string[]);
+/**
+ * Restore a file from a snapshot.
+ */
+export async function restoreSnapshot(
+  projectRoot: string,
+  snapshotId: string
+): Promise<boolean> {
+  try {
+    const snapshotPath = join(getSnapshotDir(projectRoot), `${snapshotId}.json`);
+    const snapshotData = await readFile(snapshotPath, "utf-8");
+    const snapshot: FileSnapshot = JSON.parse(snapshotData);
 
-    for (const file of files) {
-      if (!file.startsWith(snapshotId) || !file.endsWith(".snapshot")) continue;
-
-      try {
-        const content = await fs.readFile(join(this.historyDir, file), "utf-8");
-        const snapshot: FileSnapshot = JSON.parse(content);
-
-        // Check current mtime to prevent overwriting external changes
-        const resolvedPath = resolve(this.projectRoot, snapshot.path);
-        let currentMtime: number | null = null;
-
-        try {
-          const stats = await fs.stat(resolvedPath);
-          currentMtime = stats.mtime.getTime();
-        } catch {
-          // File doesn't exist, that's okay for restore
-        }
-
-        // If file exists and has been modified since snapshot, warn but still restore
-        if (currentMtime && currentMtime !== snapshot.mtime) {
-          console.warn(`Warning: File ${snapshot.path} has been modified since snapshot was taken`);
-        }
-
-        // Ensure directory exists
-        await fs.mkdir(dirname(resolvedPath), { recursive: true });
-
-        // Restore content
-        await fs.writeFile(resolvedPath, snapshot.content, "utf-8");
-
-        return true;
-      } catch (e) {
-        console.error("Failed to restore snapshot:", e);
-        return false;
-      }
-    }
-
-    return false;
-  }
-
-  // B4: Check if file has been modified externally
-  async isFileModifiedExternally(filePath: string, expectedMtime: number): Promise<boolean> {
-    const resolvedPath = resolve(this.projectRoot, filePath);
-
+    // Check if file has been modified since snapshot
     try {
-      const stats = await fs.stat(resolvedPath);
-      return stats.mtime.getTime() !== expectedMtime;
-    } catch {
-      // File doesn't exist
-      return true;
-    }
-  }
-
-  // B4: Cleanup old snapshots for a file
-  private async cleanupOldSnapshots(filePath: string): Promise<void> {
-    const snapshots = await this.getSnapshotsForFile(filePath);
-
-    if (snapshots.length <= this.maxSnapshots) return;
-
-    // Delete oldest snapshots
-    const toDelete = snapshots.slice(this.maxSnapshots);
-
-    for (const snapshot of toDelete) {
-      const fileName = `${snapshot.id}_${snapshot.timestamp}.snapshot`;
-      const filePath = join(this.historyDir, fileName);
-
-      try {
-        await fs.unlink(filePath);
-      } catch {
-        // Ignore deletion errors
+      const currentStats = await stat(snapshot.filePath);
+      if (currentStats.mtimeMs !== snapshot.mtime) {
+        console.warn(
+          `Warning: File ${snapshot.filePath} has been modified since snapshot was taken.`
+        );
       }
+    } catch {
+      // File might not exist, that's okay
     }
-  }
 
-  // B4: List all snapshots
-  async listAllSnapshots(): Promise<FileSnapshot[]> {
-    const files = await fs.readdir(this.historyDir).catch(() => [] as string[]);
-    const snapshots: FileSnapshot[] = [];
+    // Ensure parent directory exists
+    await mkdir(dirname(snapshot.filePath), { recursive: true });
+
+    // Restore the file
+    await writeFile(snapshot.filePath, snapshot.content, "utf-8");
+    return true;
+  } catch (error) {
+    console.error("Failed to restore snapshot:", error);
+    return false;
+  }
+}
+
+/**
+ * List all available snapshots.
+ */
+export async function listSnapshots(
+  projectRoot: string,
+  filePath?: string
+): Promise<SnapshotMetadata[]> {
+  try {
+    const dir = getSnapshotDir(projectRoot);
+    const files = await readdir(dir);
+
+    const snapshots: SnapshotMetadata[] = [];
 
     for (const file of files) {
-      if (!file.endsWith(".snapshot")) continue;
+      if (!file.endsWith(".json")) continue;
 
       try {
-        const content = await fs.readFile(join(this.historyDir, file), "utf-8");
-        snapshots.push(JSON.parse(content));
+        const snapshotPath = join(dir, file);
+        const data = await readFile(snapshotPath, "utf-8");
+        const snapshot: FileSnapshot = JSON.parse(data);
+
+        if (!filePath || snapshot.filePath === filePath) {
+          snapshots.push({
+            id: snapshot.id,
+            filePath: snapshot.filePath,
+            timestamp: snapshot.timestamp,
+            mtime: snapshot.mtime,
+            size: snapshot.size,
+            hash: createHash("sha256").update(snapshot.content).digest("hex").slice(0, 16),
+          });
+        }
       } catch {
         // Skip invalid snapshots
       }
     }
 
-    // Sort by timestamp descending
+    // Sort by timestamp (newest first)
     return snapshots.sort((a, b) => b.timestamp - a.timestamp);
+  } catch {
+    return [];
   }
+}
 
-  // B4: Delete snapshot
-  async deleteSnapshot(snapshotId: string): Promise<boolean> {
-    const files = await fs.readdir(this.historyDir).catch(() => [] as string[]);
+/**
+ * Get a specific snapshot by ID.
+ */
+export async function getSnapshot(
+  projectRoot: string,
+  snapshotId: string
+): Promise<FileSnapshot | null> {
+  try {
+    const snapshotPath = join(getSnapshotDir(projectRoot), `${snapshotId}.json`);
+    const data = await readFile(snapshotPath, "utf-8");
+    return JSON.parse(data) as FileSnapshot;
+  } catch {
+    return null;
+  }
+}
 
-    for (const file of files) {
-      if (file.startsWith(snapshotId) && file.endsWith(".snapshot")) {
+/**
+ * Clean up old snapshots, keeping only the most recent MAX_SNAPSHOTS.
+ */
+async function cleanupOldSnapshots(projectRoot: string): Promise<void> {
+  try {
+    const snapshots = await listSnapshots(projectRoot);
+
+    if (snapshots.length > MAX_SNAPSHOTS) {
+      const toDelete = snapshots.slice(MAX_SNAPSHOTS);
+      for (const snapshot of toDelete) {
         try {
-          await fs.unlink(join(this.historyDir, file));
-          return true;
+          const snapshotPath = join(getSnapshotDir(projectRoot), `${snapshot.id}.json`);
+          await unlink(snapshotPath);
         } catch {
-          return false;
+          // Ignore cleanup errors
         }
       }
     }
-
-    return false;
+  } catch {
+    // Ignore cleanup errors
   }
 }
 
-// B4: Global snapshot manager instance
-let globalSnapshotManager: SnapshotManager | null = null;
-
-export function getSnapshotManager(options?: SnapshotManagerOptions): SnapshotManager {
-  if (!globalSnapshotManager && options) {
-    globalSnapshotManager = new SnapshotManager(options);
+/**
+ * Check if a file has been modified externally (mtime changed).
+ */
+export async function checkFileModified(
+  filePath: string,
+  expectedMtime: number
+): Promise<boolean> {
+  try {
+    const stats = await stat(filePath);
+    return stats.mtimeMs !== expectedMtime;
+  } catch {
+    // File doesn't exist, consider it modified
+    return true;
   }
-  if (!globalSnapshotManager) {
-    throw new Error("SnapshotManager not initialized");
-  }
-  return globalSnapshotManager;
-}
-
-export function initSnapshotManager(options: SnapshotManagerOptions): SnapshotManager {
-  globalSnapshotManager = new SnapshotManager(options);
-  return globalSnapshotManager;
 }

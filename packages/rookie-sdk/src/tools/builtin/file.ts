@@ -1,5 +1,6 @@
 import { readFile, writeFile, access } from "fs/promises";
 import { Tool } from "../types.js";
+import { saveSnapshot } from "../snapshot.js";
 
 // B9: File read tool with CCB-aligned parameters
 export const fileReadTool: Tool = {
@@ -77,10 +78,15 @@ export const fileWriteTool: Tool = {
   isReadOnly: false,
   isConcurrencySafe: false,
   isDestructive: true,
-  async execute(params) {
+  async execute(params, context) {
     // B9: Support both old and new parameter names
     const filePath = String(params.file_path ?? params.path);
     const content = String(params.content);
+
+    // B4: Save snapshot before writing (if file exists)
+    if (context?.projectRoot) {
+      await saveSnapshot(context.projectRoot, filePath);
+    }
 
     // Ensure parent directories exist
     const { mkdir } = await import("fs/promises");
@@ -124,7 +130,7 @@ export const fileEditTool: Tool = {
   isReadOnly: false,
   isConcurrencySafe: false,
   isDestructive: true,
-  async execute(params) {
+  async execute(params, context) {
     // B9: Support both old and new parameter names
     const filePath = String(params.file_path ?? params.path);
     const oldText = String(params.old_string ?? params.old_text);
@@ -138,6 +144,11 @@ export const fileEditTool: Tool = {
       await access(filePath);
     } catch {
       return `[ERROR] File not found: ${filePath}`;
+    }
+
+    // B4: Save snapshot before editing
+    if (context?.projectRoot) {
+      await saveSnapshot(context.projectRoot, filePath);
     }
 
     const content = await readFile(filePath, "utf-8");
