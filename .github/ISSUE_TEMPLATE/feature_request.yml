@@ -1,0 +1,14 @@
+name: Feature Request
+ description: Suggest a feature
+title: "[Feature] "
+body:
+  - type: textarea
+    attributes:
+      label: Description
+      description: What do you want?
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Use Case
+      description: Why do you need it?

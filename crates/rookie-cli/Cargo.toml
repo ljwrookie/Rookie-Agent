@@ -1,0 +1,15 @@
+[package]
+name = "rookie-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "rookie-core"
+path = "src/main.rs"
+
+[dependencies]
+rookie-core = { path = "../rookie-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }

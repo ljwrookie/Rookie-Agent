@@ -1,0 +1,30 @@
+{
+  "name": "@rookie/agent-cli",
+  "version": "0.1.0",
+  "description": "Rookie Agent CLI",
+  "type": "module",
+  "bin": {
+    "rookie": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@rookie/agent-sdk": "workspace:*",
+    "commander": "^12",
+    "ink": "^7.0.1",
+    "react": "^19.2.5",
+    "wrap-ansi": "^10.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "@types/react": "^19.2.14",
+    "tsup": "^8",
+    "typescript": "^5.5",
+    "vitest": "^2"
+  }
+}

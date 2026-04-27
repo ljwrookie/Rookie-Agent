@@ -1,0 +1,26 @@
+{
+  "name": "rookie-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Rookie Agent - All-in-one AI Agent with TypeScript orchestration + Rust compute engine",
+  "scripts": {
+    "build": "pnpm -r build",
+    "dev": "pnpm -r dev",
+    "test": "pnpm run test:sdk && pnpm run test:cli && pnpm run test:core",
+    "test:sdk": "pnpm --filter @rookie/agent-sdk exec vitest run",
+    "test:core": "cargo test -p rookie-core --tests",
+    "test:all": "pnpm run test:sdk && pnpm run test:cli && pnpm run test:core",
+    "lint": "pnpm -r lint",
+    "test:cli": "pnpm --filter @rookie/agent-cli exec vitest run",
+    "test:eval": "pnpm --filter @rookie/eval exec vitest run",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs"
+  },
+  "devDependencies": {
+    "typescript": "^5.5",
+    "@types/node": "^22",
+    "vitepress": "^1.0"
+  },
+  "packageManager": "pnpm@9.0.0"
+}
