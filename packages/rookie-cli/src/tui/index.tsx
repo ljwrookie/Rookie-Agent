@@ -121,6 +121,9 @@ export async function startTuiCodeMode(): Promise<void> {
   // #3: Approval bridge — maps tool call to a Promise the TUI resolves
   let pendingApprovalResolve: ((decision: AskDecision) => void) | null = null;
 
+  // B10.2: User question bridge — maps question to a Promise the TUI resolves
+  let pendingQuestionResolve: ((answer: string) => void) | null = null;
+
   const tools = new ToolRegistry({
     permissions,
     hooks,
@@ -214,6 +217,12 @@ export async function startTuiCodeMode(): Promise<void> {
       sessionId,
       projectRoot,
     }),
+    // B10.2: Bridge user questions to TUI
+    onAskUser: async (_question: string, _options?: string[], _defaultValue?: string): Promise<string> => {
+      return new Promise<string>((resolve) => {
+        pendingQuestionResolve = resolve;
+      });
+    },
   };
 
   const agent = new CoderAgent();
@@ -322,6 +331,12 @@ export async function startTuiCodeMode(): Promise<void> {
       }}
       onInterrupt={() => {
         currentAbort?.abort();
+      }}
+      onQuestionResponse={(answer: string) => {
+        if (pendingQuestionResolve) {
+          pendingQuestionResolve(answer);
+          pendingQuestionResolve = null;
+        }
       }}
       tokenTracker={tokenTracker}
       commands={commands}

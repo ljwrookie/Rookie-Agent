@@ -8,6 +8,7 @@ import { useEffect, useState, useRef } from "react";
 import { Box, Text } from "ink";
 import type { TuiMode } from "../types.js";
 import { COLORS } from "../types.js";
+import { useStatusLine } from "../hooks/useStatusLine.js";
 
 interface BottomBarProps {
   mode: TuiMode;
@@ -17,6 +18,8 @@ interface BottomBarProps {
   costUsd?: number;
   inputFocused?: boolean;
   streamStatus?: "idle" | "streaming" | "stalled" | "recovering";
+  /** A7: Status line shell command */
+  statusLineCommand?: string;
 }
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -29,6 +32,8 @@ const MODE_HINTS: Record<string, Record<TuiMode, string>> = {
     logs: "Enter send │ ↑↓ history │ Tab complete │ / commands │ Esc back",
     review: "Enter send │ ↑↓ history │ Tab complete │ / commands │ Esc back",
     approve: "Enter send │ ↑↓ history │ Tab complete │ / commands │ Esc back",
+    agents: "Enter send │ ↑↓ history │ Tab complete │ / commands │ Esc back",
+    question: "Enter send │ ↑↓ history │ Tab complete │ / commands │ Esc back",
   },
   unfocused: {
     chat: "j/k scroll │ Space toggle │ d diff │ l logs │ G latest │ ? help",
@@ -37,6 +42,8 @@ const MODE_HINTS: Record<string, Record<TuiMode, string>> = {
     logs: "j/k scroll │ / filter │ ? help │ Esc back",
     review: "j/k nav │ a approve │ x reject │ ? help │ Esc back",
     approve: "a approve │ x reject │ j/k nav │ ? help │ Esc back",
+    agents: "j/k scroll │ ? help │ Esc back",
+    question: "j/k scroll │ Enter answer │ ? help │ Esc back",
   },
   processing: {
     chat: "Ctrl+C interrupt │ j/k scroll │ G auto-follow",
@@ -45,10 +52,18 @@ const MODE_HINTS: Record<string, Record<TuiMode, string>> = {
     logs: "Ctrl+C interrupt │ j/k scroll",
     review: "Ctrl+C interrupt",
     approve: "Ctrl+C interrupt │ a approve │ x reject",
+    agents: "Ctrl+C interrupt",
+    question: "Ctrl+C interrupt │ Enter answer",
   },
 };
 
-export function BottomBar({ mode, isProcessing, statusText, tokensUsed, costUsd, inputFocused = true, streamStatus = "idle" }: BottomBarProps) {
+export function BottomBar({ mode, isProcessing, statusText, tokensUsed, costUsd, inputFocused = true, streamStatus = "idle", statusLineCommand }: BottomBarProps) {
+  // A7: Status line hook
+  const { output: statusLineOutput } = useStatusLine({
+    command: statusLineCommand,
+    interval: 5000,
+    timeout: 3000,
+  });
   const [frame, setFrame] = useState(0);
 
   // Token rate tracking
@@ -105,8 +120,17 @@ export function BottomBar({ mode, isProcessing, statusText, tokensUsed, costUsd,
         <Text color={COLORS.textDim}>{hints}</Text>
       </Box>
 
-      {/* Right: tokens/cost/rate */}
+      {/* Right: status line output + tokens/cost/rate */}
       <Box>
+        {/* A7: Status line output */}
+        {statusLineOutput && (
+          <Text color={COLORS.textDim}>
+            {statusLineOutput}
+          </Text>
+        )}
+        {statusLineOutput && (tokensUsed !== undefined || costUsd !== undefined) && (
+          <Text color={COLORS.textDim}> │ </Text>
+        )}
         {tokensUsed !== undefined && (
           <Text color={COLORS.textDim}>
             {tokensUsed.toLocaleString()} tok

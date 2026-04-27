@@ -17,6 +17,7 @@ import { TopStatusBar } from "./components/TopStatusBar.js";
 import { ModeTab } from "./components/ModeTab.js";
 import { EventStream } from "./components/EventStream.js";
 import { ApprovalPanel } from "./components/ApprovalPanel.js";
+import { UserQuestionPanel } from "./components/UserQuestionPanel.js";
 import { PlanPanel } from "./components/PlanPanel.js";
 import { DiffPanel } from "./components/DiffPanel.js";
 import { LogPanel } from "./components/LogPanel.js";
@@ -35,6 +36,8 @@ export interface TuiAppProps {
   };
   onApprovalResponse: (allowed: boolean, remember?: "once" | "session" | "forever") => void;
   onInterrupt: () => void;
+  /** B10.2: Callback when user answers a question */
+  onQuestionResponse?: (answer: string) => void;
   tokenTracker?: {
     getTotalUsage: () => { totalTokens: number };
     getTotalCost: () => number;
@@ -73,7 +76,7 @@ function useDebouncedWindowSize(delay = 100): { columns: number; rows: number } 
   return debounced;
 }
 
-export function App({ onMessage, onApprovalResponse, onInterrupt, tokenTracker, commands, meta }: TuiAppProps) {
+export function App({ onMessage, onApprovalResponse, onInterrupt, onQuestionResponse, tokenTracker, commands, meta }: TuiAppProps) {
   const { exit } = useApp();
   const window = useDebouncedWindowSize();
 
@@ -316,6 +319,22 @@ export function App({ onMessage, onApprovalResponse, onInterrupt, tokenTracker, 
             state.addEvent("system", "Hook: " + event.hook, { severity: "info", collapsed: true });
             break;
           }
+          case "user_question": {
+            streamThinkId = null;
+            state.addUserQuestion({
+              question: event.question,
+              options: event.options,
+              defaultValue: event.defaultValue,
+              toolCall: { id: event.id, name: "AskUserQuestion", params: {} },
+            });
+            setStatusText("Waiting for user...");
+            break;
+          }
+          case "user_question_answer": {
+            state.addEvent("system", "User answered: " + event.answer, { severity: "info", collapsed: true });
+            setStatusText("Processing...");
+            break;
+          }
         }
       }
     } catch (e) {
@@ -423,6 +442,26 @@ export function App({ onMessage, onApprovalResponse, onInterrupt, tokenTracker, 
         return;
       }
       if (key.return) {
+        // B10.2: In question mode, submit answer instead of sending message
+        if (state.mode === "question" && onQuestionResponse) {
+          const pending = state.userQuestions.filter(q => q.status === "pending");
+          if (pending.length > 0 && state.selectedQuestionIdx < pending.length) {
+            const question = pending[state.selectedQuestionIdx];
+            if (question) {
+              const answer = inputText.trim() || question.defaultValue || "";
+              state.resolveUserQuestion(question.id, answer);
+              onQuestionResponse(answer);
+              setInputText("");
+              setInputCursor(0);
+              // Auto-switch back to chat if no more pending questions
+              const remaining = state.userQuestions.filter(q => q.status === "pending").length - 1;
+              if (remaining <= 0) {
+                state.setMode("chat");
+              }
+              return;
+            }
+          }
+        }
         const c = cmdSuggestions.length > 0 ? (cmdSuggestions[cmdSelected]?.value ?? inputText) : inputText;
         void handleSubmit(c);
         return;
@@ -506,6 +545,7 @@ export function App({ onMessage, onApprovalResponse, onInterrupt, tokenTracker, 
       if (ch === "3") { state.setMode("diff"); return; }
       if (ch === "4") { state.setMode("logs"); return; }
       if (ch === "5") { state.setMode("review"); return; }
+      if (ch === "6") { state.setMode("question"); return; }
     }
   }, [busy, cmdSuggestions, cmdSelected, inputCursor, inputFocused, inputText, state, exit, handleSubmit, lastMessage, approvalIdx, historyIdx, onApprovalResponse, onInterrupt, showHelp, exitPending]));
 
@@ -537,6 +577,7 @@ export function App({ onMessage, onApprovalResponse, onInterrupt, tokenTracker, 
       case "logs": return <LogPanel events={state.events} errors={state.errors} longTasks={state.longTasks} maxHeight={layout.mainH} scrollOffset={logScroll} />;
       case "review": return (<Box flexDirection="column" paddingX={1}><Text bold color={COLORS.system}>Review Mode</Text>{state.errors.length > 0 && <Box marginTop={1}><ErrorDisplay errors={state.errors} maxErrors={5} /></Box>}</Box>);
       case "approve": return <ApprovalPanel approvals={state.approvals} selectedIdx={approvalIdx} maxHeight={layout.mainH} />;
+      case "question": return <UserQuestionPanel questions={state.userQuestions} selectedIdx={state.selectedQuestionIdx} maxHeight={layout.mainH} />;
       default: return null;
     }
   }, [showHelp, state.mode, state.events, state.selectedEventIdx, state.approvals, state.plan, state.diffs, state.errors, state.longTasks, recentErrors, layout.mainH, diffFileIdx, diffScroll, logScroll, approvalIdx]);

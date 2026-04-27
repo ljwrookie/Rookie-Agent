@@ -5,7 +5,7 @@ import { useState, useCallback, useRef, useMemo, useEffect } from "react";
 import type {
   TuiMode, StreamEvent, ApprovalRequest, PlanState,
   DiffFile, StructuredError, LongTask, WorkspaceContext, StatusInfo,
-  EventSeverity,
+  EventSeverity, AgentStatus, MailboxMessage, UserQuestionRequest,
 } from "../types.js";
 
 // Stream idle detection configuration (from CCB)
@@ -40,6 +40,14 @@ export function useTuiState(
   const [isPlanMode, setIsPlanMode] = useState(false);
   const [events, setEvents] = useState<StreamEvent[]>([]);
   const [approvals, setApprovals] = useState<ApprovalRequest[]>([]);
+  // B10.2: User question state
+  const [userQuestions, setUserQuestions] = useState<UserQuestionRequest[]>([]);
+  const [pendingQuestionInput, setPendingQuestionInput] = useState("");
+  const [selectedQuestionIdx, setSelectedQuestionIdx] = useState(0);
+  const [isQuestionInputFocused, setIsQuestionInputFocused] = useState(false);
+  const [questionCursor, setQuestionCursor] = useState(0);
+  const [questionInputHistory, setQuestionInputHistory] = useState<string[]>([]);
+  const questionResolvers = useRef<Map<string, (answer: string) => void>>(new Map());
   const [plan, setPlan] = useState<PlanState | null>(null);
 
   // A4: Wrapped setMode that handles plan mode transitions
@@ -61,6 +69,11 @@ export function useTuiState(
   const [isProcessing, setIsProcessing] = useState(false);
   const [inputHistory, setInputHistory] = useState<string[]>([]);
   const [selectedEventIdx, setSelectedEventIdx] = useState(-1);
+
+  // D8: Multi-agent state
+  const [agents, setAgents] = useState<AgentStatus[]>([]);
+  const [mailbox, setMailbox] = useState<MailboxMessage[]>([]);
+  const [selectedAgentId, setSelectedAgentId] = useState<string | undefined>(undefined);
 
   // Stream idle detection state
   const [streamStatus, setStreamStatus] = useState<"idle" | "streaming" | "stalled" | "recovering">("idle");
@@ -155,8 +168,9 @@ export function useTuiState(
     taskStatus: streamStatus === "stalled" ? "stalled" : isProcessing ? "running" : "idle",
     backgroundProcesses: longTasks.filter(t => t.status === "running").length,
     pendingApprovals: approvals.filter(a => a.status === "pending").length,
+    pendingQuestions: userQuestions.filter(q => q.status === "pending").length,
     streamStatus,
-  }), [meta, isProcessing, streamStatus, longTasks, approvals]);
+  }), [meta, isProcessing, streamStatus, longTasks, approvals, userQuestions]);
 
   // ── Event Stream ────────────────────────────────────────────
 
@@ -230,6 +244,34 @@ export function useTuiState(
     setApprovals(prev => prev.map(a =>
       a.id === id ? { ...a, status: decision } : a
     ));
+  }, []);
+
+  // ── User Questions (B10.2) ──────────────────────────────────
+
+  const addUserQuestion = useCallback((req: Omit<UserQuestionRequest, "id" | "timestamp" | "status">): string => {
+    const id = genId("question");
+    setUserQuestions(prev => [...prev, {
+      ...req,
+      id,
+      timestamp: Date.now(),
+      status: "pending",
+    }]);
+    return id;
+  }, [genId]);
+
+  const resolveUserQuestion = useCallback((id: string, answer: string) => {
+    setUserQuestions(prev => prev.map(q =>
+      q.id === id ? { ...q, status: "answered", answer } : q
+    ));
+    const resolver = questionResolvers.current.get(id);
+    if (resolver) {
+      resolver(answer);
+      questionResolvers.current.delete(id);
+    }
+  }, []);
+
+  const setQuestionResolver = useCallback((id: string, resolver: (answer: string) => void) => {
+    questionResolvers.current.set(id, resolver);
   }, []);
 
   // ── Plan ────────────────────────────────────────────────────
@@ -329,6 +371,33 @@ export function useTuiState(
     });
   }, [events.length]);
 
+  // ── D8: Multi-Agent Management ─────────────────────────────
+
+  const updateAgent = useCallback((agentId: string, patch: Partial<AgentStatus>) => {
+    setAgents(prev => {
+      const existing = prev.find(a => a.id === agentId);
+      if (existing) {
+        return prev.map(a => a.id === agentId ? { ...a, ...patch } : a);
+      }
+      return [...prev, { id: agentId, name: agentId, state: "idle", taskSummary: "", tokensUsed: 0, toolCalls: 0, ...patch }];
+    });
+  }, []);
+
+  const removeAgent = useCallback((agentId: string) => {
+    setAgents(prev => prev.filter(a => a.id !== agentId));
+  }, []);
+
+  const addMailboxMessage = useCallback((msg: Omit<MailboxMessage, "id" | "timestamp">) => {
+    const id = genId("msg");
+    setMailbox(prev => [...prev, { ...msg, id, timestamp: Date.now() }]);
+  }, [genId]);
+
+  const clearAgents = useCallback(() => {
+    setAgents([]);
+    setMailbox([]);
+    setSelectedAgentId(undefined);
+  }, []);
+
   return {
     // State
     mode, events, approvals, plan, diffs, errors, longTasks,
@@ -336,14 +405,23 @@ export function useTuiState(
     streamStatus, retryCount: retryCountRef.current,
     // A4: Plan mode state
     isPlanMode,
+    // B10.2: User question state
+    userQuestions, pendingQuestionInput, selectedQuestionIdx,
+    isQuestionInputFocused, questionCursor, questionInputHistory,
+    // D8: Multi-agent state
+    agents, mailbox, selectedAgentId,
     // Setters
     setMode, setIsProcessing,
+    setPendingQuestionInput, setSelectedQuestionIdx,
+    setIsQuestionInputFocused, setQuestionCursor, setQuestionInputHistory,
     // Stream idle detection
     setRecoveryCallback, resetStreamIdleTimer,
     // Event stream
     addEvent, updateEvent, appendToEvent, toggleEventCollapse,
     // Approvals
     addApproval, resolveApproval,
+    // B10.2: User questions
+    addUserQuestion, resolveUserQuestion, setQuestionResolver,
     // Plan
     updatePlan,
     // Diffs
@@ -358,6 +436,8 @@ export function useTuiState(
     pushHistory,
     // Navigation
     scrollEvent, setSelectedEventIdx,
+    // D8: Multi-agent
+    updateAgent, removeAgent, addMailboxMessage, clearAgents, setSelectedAgentId,
     // Actions
     clearScreen,
   };

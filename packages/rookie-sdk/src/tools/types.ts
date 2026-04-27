@@ -28,34 +28,120 @@ export interface ToolResult {
   error?: string;
 }
 
-// B1: New structured Tool definition with generics
+// B1: Permission matcher for fine-grained permission control
+export interface PermissionMatcher {
+  tool: string;
+  args?: Record<string, unknown>;
+}
+
+// B1: Retry policy configuration
+export interface RetryPolicy {
+  maxRetries: number;
+  retryDelayMs: number;
+  retryableErrors?: string[];
+}
+
+// B1: Tool metrics for monitoring
+export interface ToolMetrics {
+  callCount: number;
+  errorCount: number;
+  totalDurationMs: number;
+  avgDurationMs: number;
+}
+
+// B1: New structured Tool definition with generics (CCB-aligned 35 fields)
 export interface ToolDefinition<I = unknown, O = unknown, P = unknown> {
+  // --- Core fields (4) ---
   name: string;
   description: string;
   inputSchema: ZodType<I>;
   outputSchema?: ZodType<O>;
   execute: (input: I, onProgress?: (progress: P) => void) => Promise<O>;
+
+  // --- Registration & Discovery (6) ---
+  aliases?: string[];
+  searchHint?: string;
+  shouldDefer?: boolean;
+  alwaysLoad?: boolean;
+  isEnabled?: (ctx: { projectRoot: string; sessionId: string }) => boolean;
+  toolGroup?: string;
+
+  // --- Safety & Permissions (7) ---
   isReadOnly?: boolean;
+  isDestructive?: boolean;
   isConcurrencySafe?: boolean;
-  // B1: JSON Schema for LLM consumption
+  validateInput?: (input: I) => { valid: boolean; error?: string };
+  checkPermissions?: (input: I, ctx: { projectRoot: string; sessionId: string }) => { allowed: boolean; reason?: string };
+  preparePermissionMatcher?: (input: I) => PermissionMatcher;
+  interruptBehavior?: "allow" | "ignore" | "abort";
+
+  // --- Output & Rendering (4) ---
+  maxResultSizeChars?: number;
+  mapToolResultToToolResultBlockParam?: (result: O) => Record<string, unknown>;
+  renderToolResultMessage?: (result: O) => string;
+  renderToolUseMessage?: (input: I) => string;
+
+  // --- Context (2) ---
+  prompt?: () => string | undefined;
+  getPath?: (input: I) => string | undefined;
+
+  // --- Execution Control (3) ---
+  timeout?: number;
+  retryPolicy?: RetryPolicy;
+  abortSignal?: AbortSignal;
+
+  // --- Monitoring (2) ---
+  metrics?: ToolMetrics;
+  traceId?: string;
+
+  // --- B1: JSON Schema for LLM consumption ---
   toJSONSchema?: () => Record<string, unknown>;
 }
 
 // B1: Tool progress callback type
 export type ToolProgressCallback<P> = (progress: P) => void;
 
-// B1: Tool builder configuration
+// B1: Tool builder configuration (CCB-aligned)
 export interface ToolBuilderConfig<I, O, P> {
+  // Core
   name: string;
   description: string;
   inputSchema: ZodType<I>;
   outputSchema?: ZodType<O>;
   execute: (input: I, onProgress?: ToolProgressCallback<P>) => Promise<O>;
+
+  // Registration & Discovery
+  aliases?: string[];
+  searchHint?: string;
+  shouldDefer?: boolean;
+  alwaysLoad?: boolean;
+  isEnabled?: (ctx: { projectRoot: string; sessionId: string }) => boolean;
+  toolGroup?: string;
+
+  // Safety & Permissions
   isReadOnly?: boolean;
+  isDestructive?: boolean;
   isConcurrencySafe?: boolean;
+  validateInput?: (input: I) => { valid: boolean; error?: string };
+  checkPermissions?: (input: I, ctx: { projectRoot: string; sessionId: string }) => { allowed: boolean; reason?: string };
+  preparePermissionMatcher?: (input: I) => PermissionMatcher;
+  interruptBehavior?: "allow" | "ignore" | "abort";
+
+  // Output & Rendering
+  maxResultSizeChars?: number;
+  renderToolResultMessage?: (result: O) => string;
+  renderToolUseMessage?: (input: I) => string;
+
+  // Context
+  prompt?: () => string | undefined;
+  getPath?: (input: I) => string | undefined;
+
+  // Execution Control
+  timeout?: number;
+  retryPolicy?: RetryPolicy;
 }
 
-// B1: Build a strongly-typed tool with Zod validation
+// B1: Build a strongly-typed tool with Zod validation (CCB-aligned)
 export function buildTool<I, O = unknown, P = unknown>(
   config: ToolBuilderConfig<I, O, P>
 ): ToolDefinition<I, O, P> & { toJSONSchema: () => Record<string, unknown> } {
@@ -65,6 +151,28 @@ export function buildTool<I, O = unknown, P = unknown>(
       return zodToJSONSchema(config.inputSchema, config.name, config.description);
     },
   };
+}
+
+// B1: Filter tools by deny rules (CCB-aligned)
+export interface DenyRule {
+  tool: string;
+  args?: string;
+}
+
+export function filterToolsByDenyRules<T extends { name: string }>(
+  tools: T[],
+  denyRules: DenyRule[]
+): T[] {
+  return tools.filter(tool => {
+    for (const rule of denyRules) {
+      // Simple glob matching
+      const regex = new RegExp("^" + rule.tool.replace(/\*/g, ".*") + "$");
+      if (regex.test(tool.name)) {
+        return false;
+      }
+    }
+    return true;
+  });
 }
 
 // B1: Convert Zod schema to JSON Schema for LLM

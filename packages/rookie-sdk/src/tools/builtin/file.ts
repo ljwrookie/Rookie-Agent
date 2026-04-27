@@ -78,14 +78,16 @@ export const fileWriteTool: Tool = {
   isReadOnly: false,
   isConcurrencySafe: false,
   isDestructive: true,
-  async execute(params, context) {
+  async execute(params) {
     // B9: Support both old and new parameter names
     const filePath = String(params.file_path ?? params.path);
     const content = String(params.content);
 
     // B4: Save snapshot before writing (if file exists)
-    if (context?.projectRoot) {
-      await saveSnapshot(context.projectRoot, filePath);
+    try {
+      await saveSnapshot(process.cwd(), filePath);
+    } catch {
+      // Snapshot failure shouldn't block write
     }
 
     // Ensure parent directories exist
@@ -130,7 +132,7 @@ export const fileEditTool: Tool = {
   isReadOnly: false,
   isConcurrencySafe: false,
   isDestructive: true,
-  async execute(params, context) {
+  async execute(params) {
     // B9: Support both old and new parameter names
     const filePath = String(params.file_path ?? params.path);
     const oldText = String(params.old_string ?? params.old_text);
@@ -147,8 +149,10 @@ export const fileEditTool: Tool = {
     }
 
     // B4: Save snapshot before editing
-    if (context?.projectRoot) {
-      await saveSnapshot(context.projectRoot, filePath);
+    try {
+      await saveSnapshot(process.cwd(), filePath);
+    } catch {
+      // Snapshot failure shouldn't block edit
     }
 
     const content = await readFile(filePath, "utf-8");

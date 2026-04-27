@@ -62,6 +62,8 @@ export interface RunReActOptions {
     prompt: string;
     tools: string[];
   }) => Promise<boolean>;
+  /** B10.2: Callback when agent needs to ask user a question. Returns user answer. */
+  onAskUser?: (question: string, options?: string[], defaultValue?: string) => Promise<string>;
 }
 
 export async function* runReAct(
@@ -101,9 +103,9 @@ export async function* runReAct(
     }
 
     if (useFC) {
-      yield* runFunctionCallingStep(agent, messages, steps, context, tracker);
+      yield* runFunctionCallingStep(agent, messages, steps, context, tracker, options);
     } else {
-      yield* runTextParsingStep(agent, input, messages, steps, context, tracker);
+      yield* runTextParsingStep(agent, input, messages, steps, context, tracker, options);
     }
 
     const lastStep = steps[steps.length - 1];
@@ -131,7 +133,8 @@ async function* runFunctionCallingStep(
   messages: Message[],
   steps: ReActStep[],
   context: AgentContext,
-  tracker?: TokenTracker
+  tracker?: TokenTracker,
+  options?: RunReActOptions
 ): AsyncGenerator<AgentEvent> {
   const toolDefs = buildToolDefinitions(agent, context);
 
@@ -187,6 +190,46 @@ async function* runFunctionCallingStep(
       };
 
       yield { type: "tool_call", call: toolCall };
+
+      // B10.2: Handle AskUserQuestion with interrupt/resume
+      if (tc.name === "AskUserQuestion" && options?.onAskUser) {
+        const question = String(toolCall.params.question ?? "");
+        const questionOptions = Array.isArray(toolCall.params.options)
+          ? toolCall.params.options.map(String)
+          : undefined;
+        const defaultValue = toolCall.params.default_value
+          ? String(toolCall.params.default_value)
+          : undefined;
+
+        const questionId = `uq_${Date.now()}_${tc.id}`;
+        yield {
+          type: "user_question",
+          question,
+          options: questionOptions,
+          defaultValue,
+          id: questionId,
+        };
+
+        try {
+          const answer = await options.onAskUser(question, questionOptions, defaultValue);
+          yield { type: "user_question_answer", id: questionId, answer };
+
+          const output = `User response: ${answer}`;
+          const result = { id: tc.id, name: tc.name, output };
+          yield { type: "tool_result", result };
+
+          steps.push({ thought: textContent, action: toolCall, observation: output });
+          messages.push({ role: "tool", content: output, tool_call_id: tc.id });
+        } catch (e) {
+          const error = e instanceof Error ? e.message : String(e);
+          const output = `[ERROR] Failed to get user response: ${error}`;
+          const result = { id: tc.id, name: tc.name, output: "", error: output };
+          yield { type: "tool_result", result };
+          messages.push({ role: "tool", content: output, tool_call_id: tc.id });
+          steps.push({ thought: textContent, action: toolCall, observation: output });
+        }
+        continue;
+      }
 
       const startTime = Date.now();
       try {
@@ -246,7 +289,8 @@ async function* runTextParsingStep(
   messages: Message[],
   steps: ReActStep[],
   context: AgentContext,
-  tracker?: TokenTracker
+  tracker?: TokenTracker,
+  options?: RunReActOptions
 ): AsyncGenerator<AgentEvent> {
   const prompt = buildReActPrompt(agent, input, steps);
   messages.push({ role: "user", content: prompt });
@@ -282,24 +326,63 @@ async function* runTextParsingStep(
   if (action) {
     yield { type: "tool_call", call: action };
 
-    const startTime = Date.now();
-    try {
-      // Use registry.invoke() for permission + hook lifecycle
-      const output = await context.tools.invoke(action.name, action.params);
-      const result = { id: action.id, name: action.name, output };
-      const duration = Date.now() - startTime;
-      yield { type: "tool_result", result, duration };
+    // B10.2: Handle AskUserQuestion with interrupt/resume (text parsing path)
+    if (action.name === "AskUserQuestion" && options?.onAskUser) {
+      const question = String(action.params.question ?? "");
+      const questionOptions = Array.isArray(action.params.options)
+        ? action.params.options.map(String)
+        : undefined;
+      const defaultValue = action.params.default_value
+        ? String(action.params.default_value)
+        : undefined;
 
-      steps.push({ thought: thought || "", action, observation: result.output });
-      messages.push({ role: "tool", content: `Result of ${action.name}: ${result.output}`, tool_call_id: action.id });
-    } catch (e) {
-      const error = e instanceof Error ? e.message : String(e);
-      const result = { id: action.id, name: action.name, output: "", error };
-      const duration = Date.now() - startTime;
-      yield { type: "tool_result", result, duration };
+      const questionId = `uq_${Date.now()}_${action.id}`;
+      yield {
+        type: "user_question",
+        question,
+        options: questionOptions,
+        defaultValue,
+        id: questionId,
+      };
 
-      steps.push({ thought: thought || "", action, observation: `Error: ${error}` });
-      messages.push({ role: "tool", content: `Error executing ${action.name}: ${error}`, tool_call_id: action.id });
+      try {
+        const answer = await options.onAskUser(question, questionOptions, defaultValue);
+        yield { type: "user_question_answer", id: questionId, answer };
+
+        const output = `User response: ${answer}`;
+        const result = { id: action.id, name: action.name, output };
+        yield { type: "tool_result", result };
+
+        steps.push({ thought: thought || "", action, observation: output });
+        messages.push({ role: "tool", content: output, tool_call_id: action.id });
+      } catch (e) {
+        const error = e instanceof Error ? e.message : String(e);
+        const output = `[ERROR] Failed to get user response: ${error}`;
+        const result = { id: action.id, name: action.name, output: "", error: output };
+        yield { type: "tool_result", result };
+        messages.push({ role: "tool", content: output, tool_call_id: action.id });
+        steps.push({ thought: thought || "", action, observation: output });
+      }
+    } else {
+      const startTime = Date.now();
+      try {
+        // Use registry.invoke() for permission + hook lifecycle
+        const output = await context.tools.invoke(action.name, action.params);
+        const result = { id: action.id, name: action.name, output };
+        const duration = Date.now() - startTime;
+        yield { type: "tool_result", result, duration };
+
+        steps.push({ thought: thought || "", action, observation: result.output });
+        messages.push({ role: "tool", content: `Result of ${action.name}: ${result.output}`, tool_call_id: action.id });
+      } catch (e) {
+        const error = e instanceof Error ? e.message : String(e);
+        const result = { id: action.id, name: action.name, output: "", error };
+        const duration = Date.now() - startTime;
+        yield { type: "tool_result", result, duration };
+
+        steps.push({ thought: thought || "", action, observation: `Error: ${error}` });
+        messages.push({ role: "tool", content: `Error executing ${action.name}: ${error}`, tool_call_id: action.id });
+      }
     }
   } else {
     yield { type: "response", content: fullContent.trim(), done: true };

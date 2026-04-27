@@ -25,6 +25,10 @@ export interface WorktreeConfig {
   path?: string;           // Custom worktree path (auto-generated if not provided)
   branch?: string;         // Branch to create worktree from
   keepOnComplete?: boolean; // Don't delete worktree after task
+  /** D2: Sparse checkout paths - only checkout these directories */
+  sparsePaths?: string[];
+  /** D2: Cherry-pick changes back to main branch on completion */
+  cherryPickOnComplete?: boolean;
 }
 
 /** Resource limits for subagent */
@@ -98,6 +102,8 @@ export interface AgentContext {
   sessionId?: string;
   /** Project root for hook context */
   projectRoot?: string;
+  /** B10.2: Callback when agent needs to ask user a question */
+  onAskUser?: (question: string, options?: string[], defaultValue?: string) => Promise<string>;
 }
 
 // ─── Message Types ───────────────────────────────────────────────
@@ -143,6 +149,18 @@ export type AgentEvent =
       before: { messages: number; tokens: number };
       after: { messages: number; tokens: number };
       summaryId?: string;
+    }
+  | {
+      type: "user_question";                      // B10.2: Ask user question
+      question: string;
+      options?: string[];
+      defaultValue?: string;
+      id: string;
+    }
+  | {
+      type: "user_question_answer";                // B10.2: User answered
+      id: string;
+      answer: string;
     };
 
 // ─── ReAct Step (internal) ───────────────────────────────────────

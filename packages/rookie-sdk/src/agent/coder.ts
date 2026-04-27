@@ -39,6 +39,8 @@ Guidelines:
   ];
 
   async *run(input: AgentInput, context: AgentContext): AsyncGenerator<AgentEvent> {
-    yield* runReAct(this, input, context);
+    yield* runReAct(this, input, context, {
+      onAskUser: context.onAskUser,
+    });
   }
 }

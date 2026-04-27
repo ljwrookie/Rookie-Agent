@@ -233,5 +233,300 @@ export const gitWorktreeTool: Tool = {
   },
 };
 
+// D2: Worktree isolation tools
+
+export interface WorktreeEntry {
+  path: string;
+  head: string;
+  branch: string;
+  bare: boolean;
+}
+
+/**
+ * Parse git worktree list output into structured entries.
+ */
+function parseWorktreeList(output: string): WorktreeEntry[] {
+  const entries: WorktreeEntry[] = [];
+  const lines = output.split("\n").filter((l) => l.trim());
+
+  for (const line of lines) {
+    // Format: path head [branch] [bare]
+    const match = line.match(/^(\S+)\s+(\S+)(?:\s+\[(.+?)\])?(?:\s+(bare))?/);
+    if (match) {
+      entries.push({
+        path: match[1],
+        head: match[2],
+        branch: match[3] || "",
+        bare: match[4] === "bare",
+      });
+    }
+  }
+  return entries;
+}
+
+/**
+ * EnterWorktree: Create and enter a git worktree for isolated task execution.
+ * D2: Worktree isolation with fail-closed policy.
+ */
+export const enterWorktreeTool: Tool = {
+  name: "enter_worktree",
+  description:
+    "Create a git worktree for isolated task execution. " +
+    "Returns the worktree path on success. " +
+    "Fail-closed: if worktree creation fails, the task should abort.",
+  parameters: [
+    { name: "slug", type: "string", description: "Unique identifier for this worktree", required: true },
+    { name: "branch", type: "string", description: "Branch to create worktree from (default: current branch)", required: false },
+    { name: "sparsePaths", type: "array", description: "Paths for sparse checkout (only checkout these directories)", required: false },
+    { name: "cwd", type: "string", description: "Git repository root", required: false },
+  ],
+  async execute(params) {
+    const cwd = params.cwd ? String(params.cwd) : process.cwd();
+    const slug = String(params.slug);
+    const branch = params.branch ? String(params.branch) : "";
+    const sparsePaths = Array.isArray(params.sparsePaths) ? params.sparsePaths.map(String) : [];
+
+    if (!slug) return "[ERROR] slug is required";
+
+    // Validate slug (alphanumeric, dash, underscore only)
+    if (!/^[\w-]+$/.test(slug)) {
+      return `[ERROR] Invalid slug: ${slug}. Use alphanumeric, dash, underscore only.`;
+    }
+
+    const worktreePath = `.rookie/worktrees/${slug}`;
+    const branchName = `rookie/${slug}`;
+
+    try {
+      // Check if we're in a git repo
+      const gitCheck = await runGit("rev-parse --git-dir", { cwd });
+      if (gitCheck.startsWith("[ERROR]")) {
+        return `[ERROR] Not a git repository: ${cwd}`;
+      }
+
+      // Create worktree directory if needed
+      const fs = await import("fs/promises");
+      const path = await import("path");
+      const fullWorktreePath = path.resolve(cwd, worktreePath);
+
+      // Check if worktree already exists
+      const existing = await runGit("worktree list", { cwd });
+      if (existing.includes(fullWorktreePath)) {
+        return `[ERROR] Worktree already exists at ${worktreePath}`;
+      }
+
+      // Create worktree with new branch
+      const baseRef = branch || "HEAD";
+      const createResult = await runGit(
+        `worktree add -b ${branchName} ${shellQuote(worktreePath)} ${baseRef}`,
+        { cwd }
+      );
+
+      if (createResult.startsWith("[ERROR]")) {
+        return `[ERROR] Failed to create worktree: ${createResult}`;
+      }
+
+      // Configure sparse checkout if paths specified
+      if (sparsePaths.length > 0) {
+        const wtCwd = fullWorktreePath;
+
+        // Enable sparse checkout
+        const sparseEnable = await runGit("sparse-checkout init --cone", { cwd: wtCwd });
+        if (sparseEnable.startsWith("[ERROR]")) {
+          // Cleanup on failure (fail-closed)
+          await runGit(`worktree remove ${shellQuote(worktreePath)} --force`, { cwd });
+          return `[ERROR] Failed to enable sparse checkout: ${sparseEnable}`;
+        }
+
+        // Set sparse paths
+        const sparseSet = await runGit(
+          `sparse-checkout set ${sparsePaths.map(shellQuote).join(" ")}`,
+          { cwd: wtCwd }
+        );
+        if (sparseSet.startsWith("[ERROR]")) {
+          // Cleanup on failure (fail-closed)
+          await runGit(`worktree remove ${shellQuote(worktreePath)} --force`, { cwd });
+          return `[ERROR] Failed to set sparse paths: ${sparseSet}`;
+        }
+      }
+
+      // Record worktree metadata
+      const metadataPath = path.join(fullWorktreePath, ".rookie", "worktree.json");
+      await fs.mkdir(path.dirname(metadataPath), { recursive: true });
+      await fs.writeFile(
+        metadataPath,
+        JSON.stringify({
+          slug,
+          createdAt: Date.now(),
+          branch: branchName,
+          baseRef,
+          sparsePaths,
+          parentCwd: cwd,
+        }, null, 2)
+      );
+
+      return JSON.stringify({
+        success: true,
+        worktreePath,
+        fullPath: fullWorktreePath,
+        branch: branchName,
+        sparseCheckout: sparsePaths.length > 0,
+      });
+    } catch (e) {
+      // Fail-closed: any error aborts
+      return `[ERROR] Worktree creation failed: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  },
+};
+
+/**
+ * ExitWorktree: Remove worktree and optionally cherry-pick changes back.
+ * D2: Worktree cleanup with change merging.
+ */
+export const exitWorktreeTool: Tool = {
+  name: "exit_worktree",
+  description:
+    "Remove a git worktree and optionally cherry-pick changes back to the main branch. " +
+    "Use this after task completion to clean up isolated worktrees.",
+  parameters: [
+    { name: "slug", type: "string", description: "Worktree identifier", required: true },
+    { name: "cherryPick", type: "boolean", description: "Cherry-pick changes back to main branch", required: false },
+    { name: "commitMessage", type: "string", description: "Commit message for cherry-pick", required: false },
+    { name: "cwd", type: "string", description: "Git repository root", required: false },
+    { name: "force", type: "boolean", description: "Force remove even with uncommitted changes", required: false },
+  ],
+  async execute(params) {
+    const cwd = params.cwd ? String(params.cwd) : process.cwd();
+    const slug = String(params.slug);
+    const cherryPick = Boolean(params.cherryPick);
+    const commitMessage = params.commitMessage ? String(params.commitMessage) : `Changes from worktree ${slug}`;
+    const force = Boolean(params.force);
+
+    if (!slug) return "[ERROR] slug is required";
+
+    const worktreePath = `.rookie/worktrees/${slug}`;
+    const branchName = `rookie/${slug}`;
+
+    try {
+      const path = await import("path");
+      const fullWorktreePath = path.resolve(cwd, worktreePath);
+
+      // Check if worktree exists
+      const existing = await runGit("worktree list", { cwd });
+      if (!existing.includes(fullWorktreePath)) {
+        return `[ERROR] Worktree not found: ${worktreePath}`;
+      }
+
+      let cherryPickedCommit: string | null = null;
+
+      // Cherry-pick changes if requested
+      if (cherryPick) {
+        // Check for changes in worktree
+        const status = await runGit("status --porcelain", { cwd: fullWorktreePath });
+        const hasChanges = status.trim().length > 0;
+
+        if (hasChanges) {
+          // Commit changes in worktree
+          const addResult = await runGit("add -A", { cwd: fullWorktreePath });
+          if (addResult.startsWith("[ERROR]")) {
+            return `[ERROR] Failed to stage changes: ${addResult}`;
+          }
+
+          const commitResult = await runGit(
+            `commit -m ${shellQuote(commitMessage)}`,
+            { cwd: fullWorktreePath }
+          );
+          if (commitResult.startsWith("[ERROR]")) {
+            return `[ERROR] Failed to commit changes: ${commitResult}`;
+          }
+
+          // Get the commit hash
+          const hashResult = await runGit("rev-parse HEAD", { cwd: fullWorktreePath });
+          cherryPickedCommit = hashResult.trim();
+
+          // Cherry-pick to main worktree
+          const cherryResult = await runGit(`cherry-pick ${cherryPickedCommit}`, { cwd });
+          if (cherryResult.startsWith("[ERROR]")) {
+            return `[ERROR] Failed to cherry-pick changes: ${cherryResult}. Resolve conflicts manually.`;
+          }
+        }
+      }
+
+      // Remove worktree
+      const removeResult = await runGit(
+        `worktree remove ${shellQuote(worktreePath)} ${force ? "--force" : ""}`.trim(),
+        { cwd }
+      );
+
+      if (removeResult.startsWith("[ERROR]")) {
+        return `[ERROR] Failed to remove worktree: ${removeResult}`;
+      }
+
+      // Clean up the branch if it still exists
+      const branchList = await runGit("branch --list", { cwd });
+      if (branchList.includes(branchName)) {
+        await runGit(`branch -D ${branchName}`, { cwd });
+      }
+
+      return JSON.stringify({
+        success: true,
+        worktreePath,
+        cherryPicked: cherryPickedCommit !== null,
+        commitHash: cherryPickedCommit,
+      });
+    } catch (e) {
+      return `[ERROR] Worktree cleanup failed: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  },
+};
+
+/**
+ * CountWorktreeChanges: Count changes in a worktree (for monitoring).
+ * D2: Worktree change tracking.
+ */
+export const countWorktreeChangesTool: Tool = {
+  name: "count_worktree_changes",
+  description: "Count the number of changed files in a worktree.",
+  parameters: [
+    { name: "slug", type: "string", description: "Worktree identifier", required: true },
+    { name: "cwd", type: "string", description: "Git repository root", required: false },
+  ],
+  async execute(params) {
+    const cwd = params.cwd ? String(params.cwd) : process.cwd();
+    const slug = String(params.slug);
+
+    if (!slug) return "[ERROR] slug is required";
+
+    const worktreePath = `.rookie/worktrees/${slug}`;
+
+    try {
+      const path = await import("path");
+      const fullWorktreePath = path.resolve(cwd, worktreePath);
+
+      // Check if worktree exists
+      const existing = await runGit("worktree list", { cwd });
+      if (!existing.includes(fullWorktreePath)) {
+        return `[ERROR] Worktree not found: ${worktreePath}`;
+      }
+
+      // Count changes
+      const status = await runGit("status --porcelain", { cwd: fullWorktreePath });
+      const lines = status.split("\n").filter((l) => l.trim());
+
+      const staged = lines.filter((l) => l.startsWith("A") || l.startsWith("M") || l.startsWith("D")).length;
+      const unstaged = lines.filter((l) => l.startsWith(" ") || l.startsWith("?")).length;
+
+      return JSON.stringify({
+        worktreePath,
+        totalChanges: lines.length,
+        staged,
+        unstaged,
+        hasChanges: lines.length > 0,
+      });
+    } catch (e) {
+      return `[ERROR] Failed to count changes: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  },
+};
+
 // Test helpers
-export const __test__ = { guardRef, shellQuote };
+export const __test__ = { guardRef, shellQuote, parseWorktreeList };

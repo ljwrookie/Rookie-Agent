@@ -6,7 +6,7 @@ import type { ToolCall } from "@rookie/agent-sdk";
 
 // ── Modes ────────────────────────────────────────────────────────
 
-export type TuiMode = "chat" | "plan" | "diff" | "logs" | "review" | "approve";
+export type TuiMode = "chat" | "plan" | "diff" | "logs" | "review" | "approve" | "agents" | "question";
 
 // ── Event Stream Items ──────────────────────────────────────────
 
@@ -43,6 +43,19 @@ export interface ApprovalRequest {
   description: string;
   detail?: string;         // full command or diff preview
   status: "pending" | "approved" | "rejected" | "edited";
+  toolCall?: ToolCall;
+}
+
+// ── User Question System (B10.2) ────────────────────────────────
+
+export interface UserQuestionRequest {
+  id: string;
+  timestamp: number;
+  question: string;
+  options?: string[];
+  defaultValue?: string;
+  status: "pending" | "answered" | "timedout";
+  answer?: string;
   toolCall?: ToolCall;
 }
 
@@ -132,7 +145,31 @@ export interface StatusInfo {
   taskStatus: string;
   backgroundProcesses: number;
   pendingApprovals: number;
+  pendingQuestions?: number;
   streamStatus?: "idle" | "streaming" | "stalled" | "recovering";
+}
+
+// ── D8: Multi-Agent State ───────────────────────────────────────
+
+export interface AgentStatus {
+  id: string;
+  name: string;
+  state: "idle" | "running" | "done" | "error";
+  taskSummary: string;
+  tokensUsed: number;
+  toolCalls: number;
+  startTime?: number;
+  duration?: number;
+  progress?: number; // 0..1
+}
+
+export interface MailboxMessage {
+  id: string;
+  from: string;
+  to: string;
+  content: string;
+  timestamp: number;
+  type: "task" | "result" | "status" | "broadcast";
 }
 
 // ── App State ───────────────────────────────────────────────────
@@ -150,6 +187,10 @@ export interface TuiState {
   isProcessing: boolean;
   inputHistory: string[];
   selectedEventIdx: number;
+  // D8: Multi-agent state
+  agents: AgentStatus[];
+  mailbox: MailboxMessage[];
+  selectedAgentId?: string;
 }
 
 // ── Keyboard ────────────────────────────────────────────────────
@@ -165,6 +206,7 @@ export const KEY_BINDINGS: KeyBinding[] = [
   { key: "Shift+Enter", description: "New line", mode: "global" },
   { key: "Ctrl+C", description: "Interrupt / Cancel", mode: "global" },
   { key: "Ctrl+L", description: "Clear screen", mode: "global" },
+  { key: "Ctrl+A", description: "Agent panel", mode: "global" },
   { key: "/", description: "Command palette", mode: "global" },
   { key: "Tab", description: "Autocomplete", mode: "global" },
   { key: "j/k", description: "Scroll events", mode: "chat" },

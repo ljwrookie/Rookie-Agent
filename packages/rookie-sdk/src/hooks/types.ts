@@ -13,7 +13,12 @@ export type HookEvent =
   | "PreCompact"
   | "PostCompact"
   | "OnPermissionAsk"
-  | "OnSkillProposed";
+  | "OnSkillProposed"
+  // C7: New events for subagent lifecycle and proactive monitoring
+  | "SubagentStart"
+  | "SubagentStop"
+  | "TeammateIdle"
+  | "ProactiveTick";
 
 /** Hook priority levels - higher number = higher priority */
 export type HookPriority = "critical" | "high" | "normal" | "low" | "background";
@@ -69,6 +74,11 @@ export interface HookConfig {
   skipIfRejected?: boolean;
   /** C2: Whether to use structured JSON output for LLM hooks */
   structuredOutput?: boolean;
+  // C4: Dedup configuration
+  /** Whether to enable deduplication for this hook. Default: true */
+  dedup?: boolean;
+  /** Custom dedup key generator. Default: uses event + matcher + input hash */
+  dedupKey?: (context: HookContext) => string;
 }
 
 export interface HookContext {
@@ -148,6 +158,23 @@ export interface HookResult {
   skipReason?: string;
   /** C2: Structured decision from LLM hook */
   decision?: HookLLMDecision;
+  // C1: Async rewake fields
+  /** Whether this hook is async and needs rewake */
+  async?: boolean;
+  /** Token to use for rewaking this hook */
+  rewakeToken?: string;
+  /** C3: Modified output for PostToolUse hooks */
+  modifiedOutput?: string;
+}
+
+/** C1: Async hook pending result */
+export interface PendingAsyncHook {
+  token: string;
+  hook: HookConfig;
+  context: HookContext;
+  startTime: number;
+  resolve: (result: HookResult) => void;
+  reject: (error: Error) => void;
 }
 
 /** C2: Structured LLM hook decision output */

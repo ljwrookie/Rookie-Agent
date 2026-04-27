@@ -38,7 +38,7 @@ export type SlashCommandCategory =
 export interface SlashCommandResult {
   prompt?: string;
   systemMessage?: string;
-  mode?: "chat" | "plan" | "diff" | "logs" | "review" | "approve";
+  mode?: "chat" | "plan" | "diff" | "logs" | "review" | "approve" | "agents";
   clear?: boolean;
   showHelp?: boolean;
   silent?: boolean;

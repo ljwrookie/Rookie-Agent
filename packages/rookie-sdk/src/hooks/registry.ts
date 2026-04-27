@@ -8,7 +8,9 @@ import {
   HookChainResult,
   HOOK_PRIORITY_VALUE,
   HookLLMDecision,
+  PendingAsyncHook,
 } from "./types.js";
+import { createHash } from "crypto";
 
 const execAsync = promisify(exec);
 
@@ -112,6 +114,15 @@ export class HookRegistry {
   private defaultRetries: number;
   private now: () => number;
 
+  // C1: Async rewake state
+  private pendingAsyncHooks = new Map<string, PendingAsyncHook>();
+  private asyncHookResults = new Map<string, HookResult>();
+  private rewakeCounter = 0;
+
+  // C4: Dedup state
+  private recentFires = new Map<string, { timestamp: number; result: HookResult }>();
+  private readonly DEDUP_WINDOW_MS = 500;
+
   constructor(options: HookRegistryOptions = {}) {
     this.fetchImpl = options.fetchImpl;
     this.promptRunner = options.promptRunner;
@@ -207,27 +218,84 @@ export class HookRegistry {
         }
       }
 
-      const mode = hook.mode ?? (hook.blocking !== false ? "blocking" : "nonBlocking");
-      const runP = this.runHook(event, hook, context);
+      // C4: Check deduplication
+      const dedupEnabled = hook.dedup !== false;
+      const dedupKey = this.generateDedupKey(event, hook, context);
+      if (dedupEnabled) {
+        const cached = this.checkDedup(dedupKey);
+        if (cached) {
+          results.push({
+            ...cached,
+            skipped: true,
+            skipReason: "deduplicated (cached result)",
+          });
+          continue;
+        }
+      }
 
-      if (mode === "blocking") {
-        const result = await runP;
+      const mode = hook.mode ?? (hook.blocking !== false ? "blocking" : "nonBlocking");
+
+      if (mode === "asyncRewake") {
+        // C1: Async rewake with token
+        const token = this.createRewakeToken();
+        const startTime = this.now();
+
+        // Create a pending hook entry
+        const pendingHook: PendingAsyncHook = {
+          token,
+          hook,
+          context,
+          startTime,
+          resolve: () => {},
+          reject: () => {},
+        };
+
+        // Create a promise that will be resolved by rewake()
+        // Store the promise to ensure it's not garbage collected
+        const hookPromise = new Promise<HookResult>((resolve, reject) => {
+          pendingHook.resolve = resolve;
+          pendingHook.reject = reject;
+        });
+
+        // Attach promise to pendingHook for potential external await
+        (pendingHook as unknown as { promise: Promise<HookResult> }).promise = hookPromise;
+
+        this.pendingAsyncHooks.set(token, pendingHook);
+
+        // Start the hook execution in background
+        this.runHook(event, hook, context).then(result => {
+          // If hook completes before rewake, auto-resolve
+          if (this.pendingAsyncHooks.has(token)) {
+            this.rewake(token, { ...result, async: true, rewakeToken: token });
+          }
+        }).catch(error => {
+          if (this.pendingAsyncHooks.has(token)) {
+            pendingHook.reject(error instanceof Error ? error : new Error(String(error)));
+            this.pendingAsyncHooks.delete(token);
+          }
+        });
+
+        results.push({
+          hook,
+          success: true,
+          output: `(async rewake hook dispatched, token: ${token})`,
+          duration: 0,
+          async: true,
+          rewakeToken: token,
+        });
+      } else if (mode === "blocking") {
+        const result = await this.runHook(event, hook, context);
         results.push(result);
         if (result.rejected) {
           anyRejected = true;
         }
-      } else if (mode === "asyncRewake") {
-        // Async rewake: don't block, but also don't fire-and-forget
-        // Store promise for later await if needed
-        this.pendingAsyncHooks.set(`${event}:${hook.matcher ?? "*"}`, runP);
-        results.push({
-          hook,
-          success: true,
-          output: "(async rewake hook dispatched)",
-          duration: 0,
-        });
+        // C4: Record for dedup
+        if (dedupEnabled) {
+          this.recordFire(dedupKey, result);
+        }
       } else {
         // Non-blocking / fire-and-forget
+        const runP = this.runHook(event, hook, context);
         runP.catch(() => void 0);
         results.push({
           hook,
@@ -235,21 +303,113 @@ export class HookRegistry {
           output: "(non-blocking hook dispatched)",
           duration: 0,
         });
+        // C4: Record for dedup (fire-and-forget also benefits from dedup)
+        if (dedupEnabled) {
+          runP.then(result => this.recordFire(dedupKey, result));
+        }
       }
     }
 
     return results;
   }
 
-  private pendingAsyncHooks = new Map<string, Promise<HookResult>>();
+  /**
+   * C1: Create a rewake token for async hooks
+   */
+  private createRewakeToken(): string {
+    return `rewake_${++this.rewakeCounter}_${this.now().toString(36)}`;
+  }
 
   /**
-   * Wait for all pending async rewake hooks to complete.
+   * C1: Rewake an async hook with a result
+   */
+  async rewake(token: string, result: HookResult): Promise<void> {
+    const pending = this.pendingAsyncHooks.get(token);
+    if (!pending) {
+      throw new Error(`No pending async hook found for token: ${token}`);
+    }
+
+    // Resolve the pending promise
+    pending.resolve(result);
+    this.asyncHookResults.set(token, result);
+    this.pendingAsyncHooks.delete(token);
+  }
+
+  /**
+   * C1: Check if there are pending async hooks
+   */
+  hasPendingAsyncHooks(): boolean {
+    return this.pendingAsyncHooks.size > 0;
+  }
+
+  /**
+   * C1: Get all pending async hook tokens
+   */
+  getPendingAsyncTokens(): string[] {
+    return Array.from(this.pendingAsyncHooks.keys());
+  }
+
+  /**
+   * C1: Wait for all pending async rewake hooks to complete.
    */
   async awaitAsyncHooks(): Promise<HookResult[]> {
-    const results = await Promise.all(this.pendingAsyncHooks.values());
+    const promises = Array.from(this.pendingAsyncHooks.values()).map(
+      p => new Promise<HookResult>((resolve, reject) => {
+        // Set up a timeout
+        const timeout = setTimeout(() => {
+          reject(new Error(`Async hook ${p.token} timed out`));
+        }, p.hook.timeout ?? DEFAULT_TIMEOUT);
+
+        // Override the resolve to clear timeout
+        const originalResolve = p.resolve;
+        p.resolve = (result: HookResult) => {
+          clearTimeout(timeout);
+          originalResolve(result);
+          resolve(result);
+        };
+      })
+    );
+
+    const results = await Promise.allSettled(promises);
     this.pendingAsyncHooks.clear();
-    return results;
+
+    return results
+      .filter((r): r is PromiseFulfilledResult<HookResult> => r.status === "fulfilled")
+      .map(r => r.value);
+  }
+
+  // C4: Dedup helper methods
+  private generateDedupKey(event: HookEvent, hook: HookConfig, context: HookContext): string {
+    if (hook.dedupKey) {
+      return `${event}::${hook.dedupKey(context)}`;
+    }
+
+    // Default: event + matcher + input hash
+    const inputStr = JSON.stringify(context.toolInput ?? {});
+    const inputHash = createHash("sha256").update(inputStr).digest("hex").slice(0, 16);
+    return `${event}::${hook.matcher ?? "*"}::${inputHash}`;
+  }
+
+  private checkDedup(key: string): HookResult | undefined {
+    const recent = this.recentFires.get(key);
+    if (recent && (this.now() - recent.timestamp) < this.DEDUP_WINDOW_MS) {
+      return recent.result;
+    }
+    return undefined;
+  }
+
+  private recordFire(key: string, result: HookResult): void {
+    this.recentFires.set(key, { timestamp: this.now(), result });
+
+    // Cleanup old entries periodically
+    if (this.recentFires.size > 1000) {
+      const cutoff = this.now() - this.DEDUP_WINDOW_MS;
+      for (const [k, v] of this.recentFires) {
+        if (v.timestamp < cutoff) {
+          this.recentFires.delete(k);
+        }
+      }
+    }
   }
 
   /** Convenience wrappers for non-tool events — keep call sites short. */

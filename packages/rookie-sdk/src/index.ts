@@ -69,9 +69,10 @@ export {
 // Tools
 export {
   type Tool, type ToolParameter,
-  // B1: New structured tool types
+  // B1: New structured tool types (CCB-aligned 35 fields)
   type ToolDefinition, type ToolBuilderConfig, type ToolProgressCallback,
-  buildTool,
+  type PermissionMatcher, type RetryPolicy, type ToolMetrics, type DenyRule,
+  buildTool, filterToolsByDenyRules,
 } from "./tools/types.js";
 export { ToolRegistry, type ToolRegistryOptions, type AskPermissionResponse } from "./tools/registry.js";
 // B3: Streaming tool executor for parallel execution
@@ -116,6 +117,15 @@ export {
   atomicWrite,
   applyUnifiedDiff,
   parseUnifiedDiff,
+  // B9.2: Edit quality upgrades
+  normalizeQuotes,
+  findActualString,
+  findAllOccurrences,
+  checkFileSize,
+  validateMtime,
+  recordFileMtime,
+  getRecordedMtime,
+  clearRecordedMtime,
 } from "./tools/builtin/edit.js";
 export { globFilesTool, grepFilesTool, globToRegExp } from "./tools/builtin/glob.js";
 export {
@@ -176,6 +186,33 @@ export {
   type NotebookCell,
   type NotebookCellType,
 } from "./tools/builtin/notebook.js";
+// B10.6: Brief mode tool
+export {
+  briefTool,
+  isBriefMode,
+  setBriefMode,
+  getBriefModePrompt,
+} from "./tools/builtin/brief.js";
+// B10.7: MCP resources tools
+export {
+  listMcpResourcesTool,
+  readMcpResourceTool,
+  registerMcpClient,
+  unregisterMcpClient,
+  getMcpClient,
+  getAllMcpClients,
+} from "./tools/builtin/mcp_resources.js";
+// B10.8: V2 Task system tools
+export {
+  taskCreateTool,
+  taskUpdateTool,
+  taskListTool,
+  taskGetTool,
+  type TaskV2,
+  type TaskStatusV2,
+  type TaskPriority,
+  type TaskStoreV2,
+} from "./tools/builtin/tasks_v2.js";
 
 // Scheduler
 export {
@@ -229,6 +266,54 @@ export { SkillLearner, type SkillRewriteCandidate } from "./skills/learner.js";
 // Agent
 export type { RunReActOptions } from "./agent/react.js";
 
+// D1: Cross-process Subagent with MCP Stdio (SubagentManager already exported above)
+export { SubagentWorker } from "./agent/subagent-worker.js";
+
+// D4: Pipe IPC / LAN Group Control
+export {
+  PipeManager,
+  initPipeManager,
+  getGlobalPipeManager,
+  setGlobalPipeManager,
+  type PipeMessage,
+  type PipeInstance,
+  type PipeManagerOptions,
+} from "./pipes/index.js";
+
+// D5: Transcript Persistence
+export {
+  TranscriptManager,
+  initTranscriptManager,
+  getGlobalTranscriptManager,
+  setGlobalTranscriptManager,
+  type TranscriptRecord,
+  type TranscriptSession,
+  type TranscriptOptions,
+} from "./harness/transcript.js";
+
+// D6: Scheduler Daemon
+export {
+  SchedulerDaemon,
+  isDaemonRunning,
+  getDaemonLogs,
+  EXIT_CODE_PERMANENT,
+  EXIT_CODE_RESTART,
+  type DaemonOptions,
+  type DaemonStatus,
+  type PendingTask,
+} from "./scheduler/daemon.js";
+
+// D7: LLM-as-Judge
+export {
+  llmJudge,
+  llmJudgePairwise,
+  LLMJudgeEvaluatorAgent,
+  type LLMJudgeOptions,
+  type LLMJudgeResult,
+  type PairwiseComparisonOptions,
+  type PairwiseComparisonResult,
+} from "./agent/evaluator.js";
+
 // MCP (Phase 3: full client + server + stdio transport)
 export { McpClient } from "./mcp/client.js";
 export { McpServer, type McpServerConfig } from "./mcp/server.js";
@@ -249,14 +334,39 @@ export {
   type CheckpointData, type VerificationResult,
 } from "./harness/types.js";
 
-// Hooks (Phase 1)
+// Hooks (Phase 1 + Phase-C enhancements)
 export { HookRegistry } from "./hooks/registry.js";
 export type {
   HookFetch,
   HookPromptRunner,
   HookRegistryOptions,
 } from "./hooks/registry.js";
-export { type HookEvent, type HookConfig, type HookContext, type HookResult } from "./hooks/types.js";
+export {
+  type HookEvent,
+  type HookConfig,
+  type HookContext,
+  type HookResult,
+  type HookPriority,
+  type HookTrustLevel,
+  type HookExecutionMode,
+  type HookLLMDecision,
+  type HookChainResult,
+  type PendingAsyncHook,
+  HOOK_PRIORITY_VALUE,
+} from "./hooks/types.js";
+// C6: Trust management
+export {
+  getProjectTrust,
+  isProjectTrusted,
+  trustProject,
+  untrustProject,
+  resetProjectTrust,
+  listTrustedProjects,
+  clearTrustCache,
+  type ProjectTrustLevel,
+  type TrustEntry,
+  type TrustStore,
+} from "./hooks/trust.js";
 
 // Instructions (Phase 1)
 export { InstructionLoader } from "./instructions/loader.js";

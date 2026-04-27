@@ -21,7 +21,8 @@ export interface SubagentConfig {
   preloadSkills?: string[];    // Skills to preload in context
   allowedTools?: string[];     // Restrict tools (default: all)
   model?: string;              // Override model selection
-  contextMode: "fork" | "shared";  // fork = isolated context, shared = same blackboard
+  /** D1: contextMode now supports "process" for cross-process subagents */
+  contextMode: "fork" | "shared" | "process";  // fork = isolated context, shared = same blackboard, process = child process
   timeout?: number;            // Max execution time in ms
 
   // === Phase-D Enhancements ===
@@ -285,7 +286,8 @@ export class SubagentManager {
   }
 
   /**
-   * Run subagent as child process.
+   * Run subagent as child process with MCP JSON-RPC over stdio.
+   * D1: Cross-process Subagent with MCP Stdio reuse
    */
   private async runChildProcess(
     config: SubagentConfig,
@@ -296,60 +298,164 @@ export class SubagentManager {
     const start = Date.now();
     const events: AgentEvent[] = [];
 
+    // Check recursion depth
+    const currentDepth = this.getRecursionDepth();
+    if (currentDepth >= 3) {
+      return {
+        name: config.name,
+        success: false,
+        events,
+        duration: 0,
+        error: `Recursion depth exceeded: ${currentDepth}/3`,
+      };
+    }
+
     return new Promise((resolve) => {
-      // Spawn child process
-      const child = spawn(process.execPath, [
-        "--eval",
-        `
-          const { SubagentWorker } = require('./subagent-worker');
-          const worker = new SubagentWorker();
-          worker.run(${JSON.stringify({ task, config })});
-        `,
-      ], {
+      // Get the path to the subagent-worker module
+      const workerPath = new URL("./subagent-worker.js", import.meta.url).pathname;
+
+      // Spawn child process with MCP worker
+      const child = spawn(process.execPath, [workerPath], {
         stdio: ["pipe", "pipe", "pipe"],
         env: {
           ...process.env,
           ROOKIE_SUBAGENT_NAME: config.name,
           ROOKIE_SUBAGENT_TASK: task,
+          ROOKIE_SUBAGENT_DEPTH: String(currentDepth + 1),
+          ROOKIE_QUERY_SOURCE: "subagent",
         },
       });
 
       this.childProcesses.set(config.name, child);
 
-      let output = "";
-      let errorOutput = "";
+      let buffer = "";
+      let pendingRequests = new Map<string | number, { resolve: (result: unknown) => void; reject: (err: Error) => void }>();
+      let requestId = 0;
+      let isReady = false;
 
+      // Helper to send JSON-RPC request
+      const sendRequest = (method: string, params?: Record<string, unknown>): Promise<unknown> => {
+        return new Promise((resolveReq, rejectReq) => {
+          const id = ++requestId;
+          const request = {
+            jsonrpc: "2.0",
+            id,
+            method,
+            params,
+          };
+
+          pendingRequests.set(id, { resolve: resolveReq, reject: rejectReq });
+
+          // Set timeout for request
+          setTimeout(() => {
+            if (pendingRequests.has(id)) {
+              pendingRequests.delete(id);
+              rejectReq(new Error(`Request timeout: ${method}`));
+            }
+          }, config.timeout || 300_000);
+
+          child.stdin?.write(JSON.stringify(request) + "\n");
+        });
+      };
+
+      // Helper to send notification
+      const sendNotification = (method: string, params?: Record<string, unknown>): void => {
+        const notification = {
+          jsonrpc: "2.0",
+          method,
+          params,
+        };
+        child.stdin?.write(JSON.stringify(notification) + "\n");
+      };
+
+      // Process stdout data (JSON-RPC responses and notifications)
       child.stdout?.on("data", (data: Buffer) => {
-        output += data.toString();
-        events.push({ type: "thinking", content: data.toString() });
-        metrics.messagesExchanged++;
+        buffer += data.toString();
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+
+          try {
+            const message = JSON.parse(trimmed) as {
+              jsonrpc: "2.0";
+              id?: string | number;
+              method?: string;
+              params?: Record<string, unknown>;
+              result?: unknown;
+              error?: { code: number; message: string };
+            };
+
+            // Handle responses
+            if (message.id !== undefined) {
+              const pending = pendingRequests.get(message.id);
+              if (pending) {
+                pendingRequests.delete(message.id);
+                if (message.error) {
+                  pending.reject(new Error(message.error.message));
+                } else {
+                  pending.resolve(message.result);
+                }
+              }
+            }
+            // Handle notifications
+            else if (message.method) {
+              switch (message.method) {
+                case "subagent/ready":
+                  isReady = true;
+                  break;
+
+                case "subagent/event": {
+                  const event = message.params?.event as AgentEvent;
+                  if (event) {
+                    events.push(event);
+                    // Update metrics based on event type
+                    switch (event.type) {
+                      case "tool_call":
+                        metrics.toolCalls++;
+                        break;
+                      case "response":
+                        metrics.messagesExchanged++;
+                        metrics.tokensUsed += Math.ceil(event.content.length / 4);
+                        break;
+                      case "error":
+                        metrics.errors++;
+                        break;
+                    }
+                  }
+                  break;
+                }
+
+                case "subagent/exiting":
+                  // Worker is shutting down
+                  break;
+
+                case "subagent/heartbeatAck":
+                  // Heartbeat acknowledged
+                  break;
+              }
+            }
+          } catch (e) {
+            // Malformed JSON - ignore
+          }
+        }
       });
 
-      child.stderr?.on("data", (data: Buffer) => {
-        errorOutput += data.toString();
+      child.stderr?.on("data", (_data: Buffer) => {
+        // Log stderr errors
         metrics.errors++;
       });
 
-      child.on("close", (code) => {
-        const duration = Date.now() - start;
+      child.on("exit", (_code) => {
         this.childProcesses.delete(config.name);
 
-        if (code === 0) {
-          resolve({
-            name: config.name,
-            success: true,
-            events,
-            duration,
-          });
-        } else {
-          resolve({
-            name: config.name,
-            success: false,
-            events,
-            duration,
-            error: `Child process exited with code ${code}: ${errorOutput}`,
-          });
+        // Clear any pending requests
+        for (const [, pending] of pendingRequests) {
+          pending.reject(new Error("Child process exited"));
         }
+        pendingRequests.clear();
       });
 
       child.on("error", (err) => {
@@ -363,20 +469,90 @@ export class SubagentManager {
         });
       });
 
+      // Main execution flow
+      const runWorker = async (): Promise<void> => {
+        try {
+          // Wait for ready notification
+          await new Promise<void>((resolveReady, rejectReady) => {
+            const checkReady = setInterval(() => {
+              if (isReady) {
+                clearInterval(checkReady);
+                clearTimeout(timeout);
+                resolveReady();
+              }
+            }, 50);
+
+            const timeout = setTimeout(() => {
+              clearInterval(checkReady);
+              rejectReady(new Error("Worker failed to become ready"));
+            }, 10000);
+          });
+
+          // Initialize worker
+          await sendRequest("subagent/init", { config, task });
+
+          // Run the task
+          const result = await sendRequest("subagent/run") as SubagentResult;
+
+          // Shutdown worker gracefully
+          sendNotification("subagent/shutdown");
+
+          const duration = Date.now() - start;
+          metrics.duration = duration;
+
+          resolve({
+            ...result,
+            name: config.name,
+            duration,
+            mode: "child",
+            metrics: { ...metrics },
+          });
+        } catch (e) {
+          const duration = Date.now() - start;
+          metrics.errors++;
+
+          // Try to kill the child
+          child.kill("SIGTERM");
+
+          resolve({
+            name: config.name,
+            success: false,
+            events,
+            duration,
+            mode: "child",
+            metrics: { ...metrics },
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+      };
+
+      // Start execution
+      runWorker();
+
       // Timeout handling
       const timeout = config.timeout || 300_000;
       setTimeout(() => {
-        child.kill("SIGTERM");
-        metrics.errors++;
-        resolve({
-          name: config.name,
-          success: false,
-          events,
-          duration: Date.now() - start,
-          error: `Child process timed out after ${timeout}ms`,
-        });
+        if (this.childProcesses.has(config.name)) {
+          child.kill("SIGTERM");
+          metrics.errors++;
+
+          // Give it a moment to exit, then force kill
+          setTimeout(() => {
+            if (!child.killed) {
+              child.kill("SIGKILL");
+            }
+          }, 5000);
+        }
       }, timeout);
     });
+  }
+
+  /**
+   * Get current recursion depth from environment.
+   */
+  private getRecursionDepth(): number {
+    const depth = parseInt(process.env.ROOKIE_SUBAGENT_DEPTH || "0", 10);
+    return isNaN(depth) ? 0 : depth;
   }
 
   /**
@@ -578,52 +754,57 @@ return {
     return "done";
   }
 
-  // ─── Worktree Support ─────────────────────────────────────────
+  // ─── Worktree Support (D2) ─────────────────────────────────────────
 
   /**
    * Setup git worktree for isolated execution.
+   * D2: Enhanced with fail-closed policy and sparse checkout support.
    */
   private async setupWorktree(name: string, config: WorktreeConfig): Promise<string> {
-    const { exec } = await import("child_process");
-    const { promisify } = await import("util");
-    const execAsync = promisify(exec);
+    const { enterWorktreeTool } = await import("../tools/builtin/git.js");
 
-    const worktreePath = config.path || `.rookie/worktrees/${name}-${Date.now()}`;
-    const branch = config.branch || `subagent/${name}`;
+    const slug = `${name}-${Date.now()}`;
+    const result = await enterWorktreeTool.execute({
+      slug,
+      branch: config.branch,
+      sparsePaths: config.sparsePaths,
+      cwd: process.cwd(),
+    });
+
+    if (typeof result === "string" && result.startsWith("[ERROR]")) {
+      // Fail-closed: throw error to abort task
+      throw new Error(`Worktree setup failed: ${result}`);
+    }
 
     try {
-      // Create worktree
-      await execAsync(`git worktree add -b ${branch} ${worktreePath}`);
-      return worktreePath;
-    } catch (e) {
-      console.error(`Failed to setup worktree: ${e}`);
-      // Fallback to regular directory
-      const fs = await import("fs/promises");
-      await fs.mkdir(worktreePath, { recursive: true });
-      return worktreePath;
+      const parsed = JSON.parse(String(result));
+      return parsed.worktreePath;
+    } catch {
+      throw new Error(`Invalid worktree response: ${result}`);
     }
   }
 
   /**
    * Cleanup git worktree.
+   * D2: Enhanced with cherry-pick support.
    */
-  private async cleanupWorktree(worktreePath: string): Promise<void> {
-    const { exec } = await import("child_process");
-    const { promisify } = await import("util");
-    const execAsync = promisify(exec);
+  private async cleanupWorktree(worktreePath: string, config?: WorktreeConfig): Promise<void> {
+    const { exitWorktreeTool } = await import("../tools/builtin/git.js");
 
-    try {
-      // Remove worktree
-      await execAsync(`git worktree remove ${worktreePath} --force`);
-    } catch (e) {
-      console.error(`Failed to cleanup worktree: ${e}`);
-      // Try to remove directory manually
-      try {
-        const fs = await import("fs/promises");
-        await fs.rm(worktreePath, { recursive: true, force: true });
-      } catch {
-        // Ignore cleanup errors
-      }
+    // Extract slug from path
+    const match = worktreePath.match(/\/([^\/]+)$/);
+    const slug = match ? match[1] : worktreePath;
+
+    const result = await exitWorktreeTool.execute({
+      slug,
+      cherryPick: config?.cherryPickOnComplete ?? false,
+      force: true, // Force remove on cleanup
+      cwd: process.cwd(),
+    });
+
+    if (typeof result === "string" && result.startsWith("[ERROR]")) {
+      console.error(`Worktree cleanup warning: ${result}`);
+      // Don't throw on cleanup errors - best effort
     }
   }
 

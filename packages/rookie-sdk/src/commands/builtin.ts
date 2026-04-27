@@ -365,6 +365,122 @@ export const DEFAULT_COMMANDS: SlashCommand[] = [
       return { theme: themeArg as "dark" | "light" | "high-contrast" };
     },
   }),
+  // D3: Coordinator mode command
+  mk({
+    name: "coordinator",
+    description: "Run coordinator mode to split tasks among worker agents",
+    usage: "/coordinator <task description>",
+    paramsHint: "Splits the task into subtasks and delegates to workers with restricted tools.",
+    category: "workflow",
+    handler: async (ctx) => {
+      const task = ctx.args.join(" ").trim();
+      if (!task) {
+        return { systemMessage: "[ERROR] Usage: /coordinator <task description>" };
+      }
+
+      // Set orchestrator mode to coordinator
+      return {
+        systemMessage: `Starting coordinator mode for: ${task.slice(0, 100)}${task.length > 100 ? "..." : ""}`,
+        prompt: task,
+      };
+    },
+  }),
+  // D4: Pipe IPC command
+  mk({
+    name: "pipes",
+    description: "List all active Rookie instances on this machine",
+    usage: "/pipes [--ping]",
+    paramsHint: "With --ping: also check connectivity to each instance.",
+    category: "system",
+    handler: async (ctx) => {
+      const { getGlobalPipeManager, initPipeManager } = await import("../pipes/index.js");
+      const shouldPing = ctx.args.includes("--ping");
+
+      let manager = getGlobalPipeManager();
+      if (!manager) {
+        try {
+          manager = await initPipeManager();
+        } catch (e) {
+          return { systemMessage: `[ERROR] Failed to initialize pipe manager: ${e}` };
+        }
+      }
+
+      const instances = await manager.listInstances();
+      const currentId = manager.getInstanceId();
+
+      if (instances.length === 0) {
+        return { systemMessage: "No other Rookie instances found." };
+      }
+
+      const lines: string[] = [`Active Rookie instances (${instances.length}):`, ""];
+
+      if (shouldPing) {
+        const pingResults = await manager.pingAll();
+        for (const instance of instances) {
+          const isSelf = instance.id === currentId;
+          const isUp = pingResults.get(instance.id);
+          const status = isSelf ? "👤 you" : isUp ? "🟢 up" : "🔴 down";
+          lines.push(`${status} · ${instance.id}`);
+          if (instance.metadata) {
+            lines.push(`   metadata: ${JSON.stringify(instance.metadata).slice(0, 100)}`);
+          }
+        }
+      } else {
+        for (const instance of instances) {
+          const isSelf = instance.id === currentId;
+          lines.push(`${isSelf ? "👤" : "📡"} · ${instance.id}${isSelf ? " (you)" : ""}`);
+        }
+      }
+
+      return { systemMessage: lines.join("\n") };
+    },
+  }),
+  // D5: History command for transcripts
+  mk({
+    name: "history",
+    description: "List recent conversation transcripts",
+    usage: "/history [limit] [--delete <session-id>]",
+    paramsHint: "Shows last 20 transcripts. Use --delete to remove a transcript.",
+    category: "system",
+    handler: async (ctx) => {
+      const { TranscriptManager } = await import("../harness/transcript.js");
+
+      // Handle delete
+      const deleteIndex = ctx.args.indexOf("--delete");
+      if (deleteIndex >= 0 && ctx.args[deleteIndex + 1]) {
+        const sessionId = ctx.args[deleteIndex + 1];
+        const success = await TranscriptManager.deleteTranscript(sessionId);
+        if (success) {
+          return { systemMessage: `Deleted transcript: ${sessionId}` };
+        } else {
+          return { systemMessage: `[ERROR] Failed to delete transcript: ${sessionId}` };
+        }
+      }
+
+      // Parse limit
+      const limitArg = ctx.args.find((a) => /^\d+$/.test(a));
+      const limit = limitArg ? parseInt(limitArg, 10) : 20;
+
+      const transcripts = await TranscriptManager.listTranscripts(limit);
+
+      if (transcripts.length === 0) {
+        return { systemMessage: "No transcripts found. Transcripts are saved automatically during sessions." };
+      }
+
+      const lines: string[] = [`Recent transcripts (${transcripts.length}):`, ""];
+
+      for (let i = 0; i < transcripts.length; i++) {
+        const t = transcripts[i];
+        const date = new Date(t.createdAt).toLocaleString();
+        lines.push(`${i + 1}. ${t.sessionId}`);
+        lines.push(`   Created: ${date} · Records: ${t.recordCount}`);
+        lines.push(`   Resume: rookie code --resume ${t.sessionId}`);
+        lines.push("");
+      }
+
+      return { systemMessage: lines.join("\n") };
+    },
+  }),
 ];
 
 /**

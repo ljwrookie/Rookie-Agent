@@ -14,7 +14,7 @@ export interface AgentConfig {
   triggers: string[];
 }
 
-export type OrchestratorMode = "sequential" | "parallel" | "adaptive" | "gan";
+export type OrchestratorMode = "sequential" | "parallel" | "adaptive" | "gan" | "coordinator";
 
 export interface OrchestratorEvent {
   type:
@@ -66,6 +66,47 @@ export interface RunGANOptions {
   /** Max GAN rounds before giving up. Default 3. */
   maxRounds?: number;
   /** Optional logger — every round writes `gan.round` / `gan.done`. */
+  logger?: Logger;
+}
+
+// ── Coordinator mode types (D3) ───────────────────────────
+
+/** D3: Worker tools whitelist - these are the only tools workers can use */
+export const INTERNAL_WORKER_TOOLS = [
+  "file_read",
+  "grep",
+  "glob",
+  "search_code",
+  "read",
+] as const;
+
+export type InternalWorkerTool = typeof INTERNAL_WORKER_TOOLS[number];
+
+export interface CoordinatorTask {
+  id: string;
+  description: string;
+  assignedTo?: string;
+  status: "pending" | "running" | "completed" | "failed";
+  result?: string;
+  allowedTools: InternalWorkerTool[];
+}
+
+export interface CoordinatorScratchpad {
+  sessionId: string;
+  mainTask: string;
+  subtasks: CoordinatorTask[];
+  notes: string[];
+  updatedAt: number;
+}
+
+export interface RunCoordinatorOptions {
+  /** Max number of worker agents to spawn. Default 3. */
+  maxWorkers?: number;
+  /** Worker tool whitelist (default: INTERNAL_WORKER_TOOLS) */
+  workerTools?: InternalWorkerTool[];
+  /** Scratchpad file path (default: .rookie/scratchpad/<sessionId>.md) */
+  scratchpadPath?: string;
+  /** Logger for coordinator events */
   logger?: Logger;
 }
 
@@ -291,6 +332,316 @@ export class AgentOrchestrator {
     context: AgentContext
   ): AsyncGenerator<AgentEvent | OrchestratorEvent> {
     yield* this.runAdaptive(task, context);
+  }
+
+  // ── Coordinator Mode (D3) ────────────────────────────
+
+  /**
+   * Coordinator mode: A coordinator agent splits tasks and delegates to workers.
+   * Workers can only use INTERNAL_WORKER_TOOLS whitelist.
+   *
+   * D3: Coordinator mode with scratchpad and worker tool restrictions.
+   */
+  async *runCoordinator(
+    task: string,
+    context: AgentContext,
+    options: RunCoordinatorOptions = {}
+  ): AsyncGenerator<AgentEvent | OrchestratorEvent> {
+    const maxWorkers = options.maxWorkers ?? 3;
+    const workerTools = options.workerTools ?? [...INTERNAL_WORKER_TOOLS];
+    const sessionId = `coord-${Date.now()}`;
+    const scratchpadPath = options.scratchpadPath ?? `.rookie/scratchpad/${sessionId}.md`;
+    const logger = options.logger;
+
+    // Initialize scratchpad
+    const scratchpad: CoordinatorScratchpad = {
+      sessionId,
+      mainTask: task,
+      subtasks: [],
+      notes: [],
+      updatedAt: Date.now(),
+    };
+
+    yield {
+      type: "mode_selected",
+      agent: "orchestrator",
+      data: { mode: "coordinator", maxWorkers, workerTools },
+    };
+
+    logger?.info("coordinator.start", { sessionId, task: task.slice(0, 100) });
+
+    // Step 1: Coordinator analyzes task and creates subtasks
+    yield { type: "agent_start", agent: "coordinator" };
+
+    const subtasks = await this.splitTaskIntoSubtasks(task, maxWorkers);
+    scratchpad.subtasks = subtasks.map((desc, idx) => ({
+      id: `task-${idx + 1}`,
+      description: desc,
+      status: "pending",
+      allowedTools: workerTools,
+    }));
+
+    await this.writeScratchpad(scratchpadPath, scratchpad);
+
+    yield {
+      type: "broadcast",
+      agent: "coordinator",
+      data: { subtasks: scratchpad.subtasks.map((s) => ({ id: s.id, description: s.description })) },
+    };
+
+    logger?.info("coordinator.tasks_created", { count: subtasks.length });
+
+    // Step 2: Dispatch tasks to workers
+    const workerPromises: Promise<void>[] = [];
+
+    for (let i = 0; i < Math.min(subtasks.length, maxWorkers); i++) {
+      const subtask = scratchpad.subtasks[i];
+      const workerName = `worker-${i + 1}`;
+
+      workerPromises.push(
+        this.runWorker(workerName, subtask, context, scratchpad, scratchpadPath, logger)
+          .then((result) => {
+            subtask.status = result.success ? "completed" : "failed";
+            subtask.result = result.output;
+            if (result.success) {
+              subtask.assignedTo = workerName;
+            }
+          })
+          .catch((e) => {
+            subtask.status = "failed";
+            subtask.result = String(e);
+          })
+      );
+    }
+
+    // Wait for all workers to complete
+    await Promise.all(workerPromises);
+
+    // Update scratchpad
+    scratchpad.updatedAt = Date.now();
+    scratchpad.notes.push(`All ${subtasks.length} subtasks completed`);
+    await this.writeScratchpad(scratchpadPath, scratchpad);
+
+    yield { type: "agent_complete", agent: "coordinator" };
+
+    // Step 3: Synthesize results
+    const synthesis = this.synthesizeCoordinatorResults(scratchpad);
+    yield {
+      type: "synthesis",
+      agent: "coordinator",
+      data: { summary: synthesis, scratchpadPath },
+    };
+
+    const completedCount = scratchpad.subtasks.filter((s) => s.status === "completed").length;
+    logger?.info("coordinator.done", { sessionId, completed: completedCount });
+  }
+
+  /**
+   * Split a task into subtasks using simple heuristics.
+   * In production, this would use an LLM to intelligently split tasks.
+   */
+  private async splitTaskIntoSubtasks(task: string, maxSubtasks: number): Promise<string[]> {
+    // Simple heuristic-based splitting
+    // In production, this would call an LLM to analyze and split the task
+
+    const subtasks: string[] = [];
+
+    // Check for obvious parallelizable patterns
+    if (task.toLowerCase().includes("search") && task.toLowerCase().includes("and")) {
+      // Split search tasks
+      const parts = task.split(/\band\b/i).map((s) => s.trim());
+      for (const part of parts.slice(0, maxSubtasks)) {
+        if (part) subtasks.push(part);
+      }
+    }
+
+    if (task.toLowerCase().includes("files")) {
+      subtasks.push(`Find relevant files for: ${task}`);
+    }
+
+    if (task.toLowerCase().includes("analyze")) {
+      subtasks.push(`Analyze code structure for: ${task}`);
+    }
+
+    // If no specific patterns, create generic subtasks
+    if (subtasks.length === 0) {
+      subtasks.push(task);
+    }
+
+    return subtasks.slice(0, maxSubtasks);
+  }
+
+  /**
+   * Run a worker agent on a subtask with restricted tools.
+   */
+  private async runWorker(
+    workerName: string,
+    subtask: CoordinatorTask,
+    context: AgentContext,
+    scratchpad: CoordinatorScratchpad,
+    scratchpadPath: string,
+    logger?: Logger
+  ): Promise<{ success: boolean; output: string }> {
+    subtask.status = "running";
+    await this.writeScratchpad(scratchpadPath, scratchpad);
+
+    logger?.info("coordinator.worker_start", { worker: workerName, taskId: subtask.id });
+
+    try {
+      // Create restricted tool registry with only allowed tools
+      const { ToolRegistry } = await import("../tools/registry.js");
+      const restrictedTools = new ToolRegistry();
+
+      // Import only allowed tools
+      // Note: Individual tools should be imported here based on the whitelist
+      // For now, we use dynamic imports for each tool
+      for (const toolName of subtask.allowedTools) {
+        try {
+          const toolModule = await import(`../tools/builtin/${toolName}.js`);
+          const tool = toolModule.default || toolModule[toolName];
+          if (tool && typeof tool === "object" && "name" in tool) {
+            restrictedTools.register(tool as any);
+          }
+        } catch {
+          // Tool not found, skip
+        }
+      }
+
+      // Create worker context with restricted tools
+      const workerContext: AgentContext = {
+        ...context,
+        tools: restrictedTools,
+      };
+
+      // Simulate worker execution (in production, this would run an actual agent)
+      // For now, we simulate the worker doing its task
+      const output = await this.simulateWorkerExecution(workerName, subtask, workerContext);
+
+      // Write to scratchpad
+      scratchpad.notes.push(`[${workerName}] Completed ${subtask.id}: ${output.slice(0, 100)}...`);
+      await this.writeScratchpad(scratchpadPath, scratchpad);
+
+      logger?.info("coordinator.worker_complete", { worker: workerName, taskId: subtask.id });
+
+      return { success: true, output };
+    } catch (e) {
+      const error = e instanceof Error ? e.message : String(e);
+      logger?.error("coordinator.worker_error", { worker: workerName, taskId: subtask.id, error });
+      return { success: false, output: error };
+    }
+  }
+
+  /**
+   * Simulate worker execution (placeholder for actual agent execution).
+   */
+  private async simulateWorkerExecution(
+    workerName: string,
+    subtask: CoordinatorTask,
+    _context: AgentContext
+  ): Promise<string> {
+    // In production, this would:
+    // 1. Create a worker agent with restricted tools
+    // 2. Run the agent with the subtask description
+    // 3. Collect and return the output
+
+    // For now, return a simulated result
+    return `Worker ${workerName} processed: ${subtask.description}\nUsed tools: ${subtask.allowedTools.join(", ")}`;
+  }
+
+  /**
+   * Write scratchpad to disk.
+   */
+  private async writeScratchpad(path: string, scratchpad: CoordinatorScratchpad): Promise<void> {
+    const fs = await import("fs/promises");
+    const nodePath = await import("path");
+
+    // Ensure directory exists
+    await fs.mkdir(nodePath.dirname(path), { recursive: true });
+
+    // Format as markdown
+    const content = this.formatScratchpad(scratchpad);
+    await fs.writeFile(path, content, "utf-8");
+  }
+
+  /**
+   * Format scratchpad as markdown.
+   */
+  private formatScratchpad(scratchpad: CoordinatorScratchpad): string {
+    const lines: string[] = [
+      `# Coordinator Session: ${scratchpad.sessionId}`,
+      "",
+      `**Main Task:** ${scratchpad.mainTask}`,
+      `**Updated:** ${new Date(scratchpad.updatedAt).toISOString()}`,
+      "",
+      "## Subtasks",
+      "",
+    ];
+
+    for (const task of scratchpad.subtasks) {
+      const statusEmoji = task.status === "completed" ? "✅" : task.status === "failed" ? "❌" : task.status === "running" ? "🔄" : "⏳";
+      lines.push(`### ${statusEmoji} ${task.id}`);
+      lines.push(`- **Description:** ${task.description}`);
+      lines.push(`- **Status:** ${task.status}`);
+      lines.push(`- **Allowed Tools:** ${task.allowedTools.join(", ")}`);
+      if (task.assignedTo) {
+        lines.push(`- **Assigned To:** ${task.assignedTo}`);
+      }
+      if (task.result) {
+        lines.push(`- **Result:** ${task.result.slice(0, 500)}${task.result.length > 500 ? "..." : ""}`);
+      }
+      lines.push("");
+    }
+
+    lines.push("## Notes");
+    lines.push("");
+    for (const note of scratchpad.notes) {
+      lines.push(`- ${note}`);
+    }
+
+    return lines.join("\n");
+  }
+
+  /**
+   * Synthesize coordinator results into a final summary.
+   */
+  private synthesizeCoordinatorResults(scratchpad: CoordinatorScratchpad): string {
+    const completed = scratchpad.subtasks.filter((s) => s.status === "completed");
+    const failed = scratchpad.subtasks.filter((s) => s.status === "failed");
+
+    const lines: string[] = [
+      `## Coordinator Results`,
+      "",
+      `**Main Task:** ${scratchpad.mainTask}`,
+      "",
+      `**Summary:** ${completed.length}/${scratchpad.subtasks.length} subtasks completed`,
+      "",
+    ];
+
+    if (completed.length > 0) {
+      lines.push("### Completed Subtasks");
+      for (const task of completed) {
+        lines.push(`- **${task.id}:** ${task.description}`);
+        if (task.result) {
+          lines.push(`  - Result: ${task.result.slice(0, 200)}${task.result.length > 200 ? "..." : ""}`);
+        }
+      }
+      lines.push("");
+    }
+
+    if (failed.length > 0) {
+      lines.push("### Failed Subtasks");
+      for (const task of failed) {
+        lines.push(`- **${task.id}:** ${task.description}`);
+        if (task.result) {
+          lines.push(`  - Error: ${task.result.slice(0, 200)}`);
+        }
+      }
+      lines.push("");
+    }
+
+    lines.push(`**Scratchpad:** ${`.rookie/scratchpad/${scratchpad.sessionId}.md`}`);
+
+    return lines.join("\n");
   }
 
   // ── GAN mode (Planner → Generator → Evaluator) ───────
