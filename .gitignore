@@ -48,6 +48,9 @@ temp/
 log/
 .rookie/
 packages/rookie-sdk/src/.rookie/
+
+# Private docs
+docs/superpowers/
 packages/rookie-eval/.rookie/
 
 # Coco/Trae local config
