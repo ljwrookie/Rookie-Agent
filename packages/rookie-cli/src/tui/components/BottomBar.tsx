@@ -33,7 +33,6 @@ const MODE_HINTS: Record<string, Record<TuiMode, string>> = {
     review: "Enter send │ ↑↓ history │ Tab complete │ / commands │ Esc back",
     approve: "Enter send │ ↑↓ history │ Tab complete │ / commands │ Esc back",
     agents: "Enter send │ ↑↓ history │ Tab complete │ / commands │ Esc back",
-    question: "Enter send │ ↑↓ history │ Tab complete │ / commands │ Esc back",
   },
   unfocused: {
     chat: "j/k scroll │ Space toggle │ d diff │ l logs │ G latest │ ? help",
@@ -43,7 +42,6 @@ const MODE_HINTS: Record<string, Record<TuiMode, string>> = {
     review: "j/k nav │ a approve │ x reject │ ? help │ Esc back",
     approve: "a approve │ x reject │ j/k nav │ ? help │ Esc back",
     agents: "j/k scroll │ ? help │ Esc back",
-    question: "j/k scroll │ Enter answer │ ? help │ Esc back",
   },
   processing: {
     chat: "Ctrl+C interrupt │ j/k scroll │ G auto-follow",
@@ -53,7 +51,6 @@ const MODE_HINTS: Record<string, Record<TuiMode, string>> = {
     review: "Ctrl+C interrupt",
     approve: "Ctrl+C interrupt │ a approve │ x reject",
     agents: "Ctrl+C interrupt",
-    question: "Ctrl+C interrupt │ Enter answer",
   },
 };
 

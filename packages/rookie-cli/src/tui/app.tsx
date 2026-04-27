@@ -17,7 +17,6 @@ import { TopStatusBar } from "./components/TopStatusBar.js";
 import { ModeTab } from "./components/ModeTab.js";
 import { EventStream } from "./components/EventStream.js";
 import { ApprovalPanel } from "./components/ApprovalPanel.js";
-import { UserQuestionPanel } from "./components/UserQuestionPanel.js";
 import { PlanPanel } from "./components/PlanPanel.js";
 import { DiffPanel } from "./components/DiffPanel.js";
 import { LogPanel } from "./components/LogPanel.js";
@@ -442,24 +441,17 @@ export function App({ onMessage, onApprovalResponse, onInterrupt, onQuestionResp
         return;
       }
       if (key.return) {
-        // B10.2: In question mode, submit answer instead of sending message
-        if (state.mode === "question" && onQuestionResponse) {
-          const pending = state.userQuestions.filter(q => q.status === "pending");
-          if (pending.length > 0 && state.selectedQuestionIdx < pending.length) {
-            const question = pending[state.selectedQuestionIdx];
-            if (question) {
-              const answer = inputText.trim() || question.defaultValue || "";
-              state.resolveUserQuestion(question.id, answer);
-              onQuestionResponse(answer);
-              setInputText("");
-              setInputCursor(0);
-              // Auto-switch back to chat if no more pending questions
-              const remaining = state.userQuestions.filter(q => q.status === "pending").length - 1;
-              if (remaining <= 0) {
-                state.setMode("chat");
-              }
-              return;
-            }
+        // B10.2: If there are pending questions, submit answer instead of sending message
+        const pendingQuestions = state.userQuestions.filter(q => q.status === "pending");
+        if (pendingQuestions.length > 0 && onQuestionResponse) {
+          const question = pendingQuestions[state.selectedQuestionIdx] ?? pendingQuestions[0];
+          if (question) {
+            const answer = inputText.trim() || question.defaultValue || "";
+            state.resolveUserQuestion(question.id, answer);
+            onQuestionResponse(answer);
+            setInputText("");
+            setInputCursor(0);
+            return;
           }
         }
         const c = cmdSuggestions.length > 0 ? (cmdSuggestions[cmdSelected]?.value ?? inputText) : inputText;
@@ -545,7 +537,6 @@ export function App({ onMessage, onApprovalResponse, onInterrupt, onQuestionResp
       if (ch === "3") { state.setMode("diff"); return; }
       if (ch === "4") { state.setMode("logs"); return; }
       if (ch === "5") { state.setMode("review"); return; }
-      if (ch === "6") { state.setMode("question"); return; }
     }
   }, [busy, cmdSuggestions, cmdSelected, inputCursor, inputFocused, inputText, state, exit, handleSubmit, lastMessage, approvalIdx, historyIdx, onApprovalResponse, onInterrupt, showHelp, exitPending]));
 
@@ -569,7 +560,35 @@ export function App({ onMessage, onApprovalResponse, onInterrupt, onQuestionResp
                 <Text color={COLORS.textDim}>press </Text><Text bold color={COLORS.system}>a</Text><Text color={COLORS.textDim}> approve or </Text><Text bold color={COLORS.system}>Approve</Text><Text color={COLORS.textDim}> mode</Text>
               </Box>
             )}
-            <EventStream events={state.events} selectedIdx={state.selectedEventIdx} maxHeight={layout.mainH - (recentErrors.length > 0 ? 5 : 0)} />
+            {state.userQuestions.filter(q => q.status === "pending").length > 0 && (
+              <Box paddingX={1} marginBottom={1} flexDirection="column">
+                <Text color={COLORS.warning} bold>{"? " + state.userQuestions.filter(q => q.status === "pending").length + " question(s) pending your answer"}</Text>
+                {state.userQuestions.filter(q => q.status === "pending").map((q, i) => (
+                  <Box key={q.id} flexDirection="column" marginTop={1} borderStyle={i === state.selectedQuestionIdx ? "round" : undefined} borderColor={i === state.selectedQuestionIdx ? COLORS.system : undefined} paddingX={1}>
+                    <Box>
+                      <Text color={COLORS.warning} bold>? </Text>
+                      <Text color={COLORS.text} wrap="wrap">{q.question}</Text>
+                    </Box>
+                    {q.options && q.options.length > 0 && (
+                      <Box flexDirection="column" marginTop={1}>
+                        {q.options.map((opt, idx) => (
+                          <Box key={idx}>
+                            <Text color={COLORS.system} bold>{idx + 1}. </Text>
+                            <Text color={COLORS.text}>{opt}</Text>
+                          </Box>
+                        ))}
+                      </Box>
+                    )}
+                    {q.defaultValue && (
+                      <Box marginTop={1}>
+                        <Text color={COLORS.textDim}>Default: <Text color={COLORS.success}>{q.defaultValue}</Text></Text>
+                      </Box>
+                    )}
+                  </Box>
+                ))}
+              </Box>
+            )}
+            <EventStream events={state.events} selectedIdx={state.selectedEventIdx} maxHeight={layout.mainH - (recentErrors.length > 0 ? 5 : 0) - (state.userQuestions.filter(q => q.status === "pending").length > 0 ? 8 : 0)} />
           </Box>
         );
       case "plan": return <PlanPanel plan={state.plan} maxHeight={layout.mainH} />;
@@ -577,7 +596,6 @@ export function App({ onMessage, onApprovalResponse, onInterrupt, onQuestionResp
       case "logs": return <LogPanel events={state.events} errors={state.errors} longTasks={state.longTasks} maxHeight={layout.mainH} scrollOffset={logScroll} />;
       case "review": return (<Box flexDirection="column" paddingX={1}><Text bold color={COLORS.system}>Review Mode</Text>{state.errors.length > 0 && <Box marginTop={1}><ErrorDisplay errors={state.errors} maxErrors={5} /></Box>}</Box>);
       case "approve": return <ApprovalPanel approvals={state.approvals} selectedIdx={approvalIdx} maxHeight={layout.mainH} />;
-      case "question": return <UserQuestionPanel questions={state.userQuestions} selectedIdx={state.selectedQuestionIdx} maxHeight={layout.mainH} />;
       default: return null;
     }
   }, [showHelp, state.mode, state.events, state.selectedEventIdx, state.approvals, state.plan, state.diffs, state.errors, state.longTasks, recentErrors, layout.mainH, diffFileIdx, diffScroll, logScroll, approvalIdx]);
@@ -597,7 +615,13 @@ export function App({ onMessage, onApprovalResponse, onInterrupt, onQuestionResp
       {cmdSuggestions.length > 0 && <CommandSuggestions items={cmdSuggestions} selectedIndex={cmdSelected} />}
       {/* A4: Plan Mode is read-only, hide input panel */}
       {state.mode !== "plan" && (
-        <InputPanel value={inputText} cursor={inputCursor} mode={state.mode} disabled={busy} placeholder={busy ? "Processing... (Ctrl+C to interrupt)" : "Type a message or /command..."} displayWidth={inputDisplayWidth} />
+        <InputPanel value={inputText} cursor={inputCursor} mode={state.mode} disabled={busy} placeholder={
+          state.userQuestions.filter(q => q.status === "pending").length > 0
+            ? "Answer the question above and press Enter..."
+            : busy
+              ? "Processing... (Ctrl+C to interrupt)"
+              : "Type a message or /command..."
+        } displayWidth={inputDisplayWidth} />
       )}
       {/* A4: Show plan mode indicator when in plan mode */}
       {state.mode === "plan" && (

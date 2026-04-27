@@ -6,7 +6,7 @@ import type { ToolCall } from "@rookie/agent-sdk";
 
 // ── Modes ────────────────────────────────────────────────────────
 
-export type TuiMode = "chat" | "plan" | "diff" | "logs" | "review" | "approve" | "agents" | "question";
+export type TuiMode = "chat" | "plan" | "diff" | "logs" | "review" | "approve" | "agents";
 
 // ── Event Stream Items ──────────────────────────────────────────
 

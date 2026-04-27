@@ -25,7 +25,6 @@ const MODE_PROMPT: Record<TuiMode, { label: string; color: string }> = {
   review: { label: "◎", color: COLORS.toolName },
   approve: { label: "!", color: COLORS.warning },
   agents: { label: "⚡", color: COLORS.system },
-  question: { label: "?", color: COLORS.warning },
 };
 
 const MAX_INPUT_LINES = 8;

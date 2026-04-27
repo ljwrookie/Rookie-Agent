@@ -22,7 +22,6 @@ const MODE_LABELS: Record<TuiMode, string> = {
   review: "REVIEW",
   approve: "APPROVE",
   agents: "AGENTS",
-  question: "QUESTION",
 };
 
 export function TopStatusBar({ status, mode, version, isProcessing, isPlanMode }: TopStatusBarProps) {
