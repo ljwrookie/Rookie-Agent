@@ -3,6 +3,9 @@ name = "rookie-core"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 tree-sitter = { workspace = true }
 tree-sitter-typescript = { workspace = true }
@@ -22,3 +25,27 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 streaming-iterator = "0.1.9"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
+# P5: Search & Diff engines
+grep-regex = { workspace = true }
+grep-searcher = { workspace = true }
+globset = { workspace = true }
+rayon = { workspace = true }
+similar = { workspace = true }
+napi = { workspace = true, optional = true }
+napi-derive = { workspace = true, optional = true }
+# P6: Hook condition engine & Memory store
+rhai = { version = "1.20", features = ["sync", "unchecked"] }
+regex = "1.10"
+rusqlite = { version = "0.33", features = ["bundled-full", "serde_json", "uuid"] }
+# P7: Scheduler & Blackboard
+cron = { workspace = true }
+async-trait = { workspace = true }
+uuid = { workspace = true }
+chrono = { version = "0.4", features = ["serde"] }
+tiktoken-rs = { workspace = true }
+fastrand = "2"
+tempfile = "3"
+
+[features]
+default = []
+napi = ["dep:napi", "dep:napi-derive"]

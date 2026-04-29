@@ -6,7 +6,7 @@
 import { useRef, useEffect, useMemo } from "react";
 import { Box, Text, useCursor, type DOMElement } from "ink";
 import type { TuiMode } from "../types.js";
-import { COLORS } from "../types.js";
+import { useTheme } from "../hooks/useTheme.js";
 
 interface InputPanelProps {
   value: string;
@@ -17,15 +17,21 @@ interface InputPanelProps {
   displayWidth?: number;
 }
 
-const MODE_PROMPT: Record<TuiMode, { label: string; color: string }> = {
-  chat: { label: "❯", color: COLORS.success },
-  plan: { label: "◆", color: COLORS.system },
-  diff: { label: "±", color: COLORS.warning },
-  logs: { label: "▪", color: COLORS.textDim },
-  review: { label: "◎", color: COLORS.toolName },
-  approve: { label: "!", color: COLORS.warning },
-  agents: { label: "⚡", color: COLORS.system },
-};
+function useModePrompt(theme: { colors: Record<string, string> }): Record<TuiMode, { label: string; color: string }> {
+  return {
+    chat: { label: "❯", color: theme.colors.success },
+    plan: { label: "◆", color: theme.colors.system },
+    diff: { label: "±", color: theme.colors.warning },
+    logs: { label: "▪", color: theme.colors.textDim },
+    review: { label: "◎", color: theme.colors.toolName },
+    approve: { label: "!", color: theme.colors.warning },
+    agents: { label: "⚡", color: theme.colors.system },
+    model: { label: "◈", color: theme.colors.system },
+    checkpoint: { label: "↶", color: theme.colors.system },
+    skill: { label: "⚙", color: theme.colors.system },
+    memory: { label: "🧠", color: theme.colors.system },
+  };
+}
 
 const MAX_INPUT_LINES = 8;
 const MIN_INPUT_HEIGHT = 3; // border-top + 1 content line + border-bottom
@@ -86,6 +92,8 @@ function getAbsolutePosition(element: DOMElement): { x: number; y: number } {
 }
 
 export function InputPanel({ value, cursor, mode, disabled, placeholder, displayWidth = 60 }: InputPanelProps) {
+  const { theme } = useTheme();
+  const MODE_PROMPT = useModePrompt(theme);
   const prompt = MODE_PROMPT[mode];
   const cur = clamp(cursor, 0, value.length);
 
@@ -151,7 +159,7 @@ export function InputPanel({ value, cursor, mode, disabled, placeholder, display
   const isMultiLine = lines.length > 1;
 
   return (
-    <Box ref={boxRef} borderStyle="round" borderColor={disabled ? COLORS.textDim : COLORS.border} paddingX={1} height={boxHeight} flexDirection="column">
+    <Box ref={boxRef} borderStyle="round" borderColor={disabled ? theme.colors.textDim : theme.colors.border} paddingX={1} height={boxHeight} flexDirection="column">
       {value.length > 0 ? (
         visibleLines.map((vl, idx) => (
           <Box key={idx} flexDirection="row">
@@ -159,19 +167,19 @@ export function InputPanel({ value, cursor, mode, disabled, placeholder, display
             {idx === 0 ? (
               <Text color={prompt.color} bold>{prompt.label} </Text>
             ) : (
-              <Text color={COLORS.textDim}>· </Text>
+              <Text color={theme.colors.textDim}>· </Text>
             )}
             {vl.isCursorLine ? (
               <>
-                <Text color={disabled ? COLORS.textDim : COLORS.text} wrap="truncate-end">
+                <Text color={disabled ? theme.colors.textDim : theme.colors.text} wrap="truncate-end">
                   {vl.before}
                 </Text>
-                <Text color={disabled ? COLORS.textDim : COLORS.text} wrap="truncate-end">
+                <Text color={disabled ? theme.colors.textDim : theme.colors.text} wrap="truncate-end">
                   {vl.after}
                 </Text>
               </>
             ) : (
-              <Text color={disabled ? COLORS.textDim : COLORS.text} wrap="truncate-end">
+              <Text color={disabled ? theme.colors.textDim : theme.colors.text} wrap="truncate-end">
                 {vl.before}{vl.after}
               </Text>
             )}
@@ -180,7 +188,7 @@ export function InputPanel({ value, cursor, mode, disabled, placeholder, display
       ) : (
         <Box flexDirection="row">
           <Text color={prompt.color} bold>{prompt.label} </Text>
-          <Text color={COLORS.textDim} dimColor wrap="truncate-end">
+          <Text color={theme.colors.textDim} dimColor wrap="truncate-end">
             {placeholder || "Type a message or /command... (Alt+Enter for new line)"}
           </Text>
         </Box>
@@ -188,7 +196,7 @@ export function InputPanel({ value, cursor, mode, disabled, placeholder, display
       {/* Multi-line indicator */}
       {isMultiLine && lines.length > MAX_INPUT_LINES && (
         <Box justifyContent="flex-end">
-          <Text color={COLORS.textDim} dimColor>
+          <Text color={theme.colors.textDim} dimColor>
             [{cursorLine + 1}/{lines.length}]
           </Text>
         </Box>

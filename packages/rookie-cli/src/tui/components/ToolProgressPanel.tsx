@@ -4,7 +4,7 @@
 
 import React from "react";
 import { Box, Text } from "ink";
-import { COLORS } from "../types.js";
+import { useTheme } from "../hooks/useTheme.js";
 
 export interface ToolProgress {
   id: string;
@@ -25,13 +25,14 @@ interface ToolProgressPanelProps {
 }
 
 export function ToolProgressPanel({ tools, maxHeight = 10, compact = false }: ToolProgressPanelProps) {
+  const { theme } = useTheme();
   const activeTools = tools.filter(t => t.status === "running" || t.status === "pending");
   const completedTools = tools.filter(t => t.status === "completed" || t.status === "failed" || t.status === "cancelled");
 
   if (tools.length === 0) {
     return (
       <Box flexDirection="column" paddingX={1}>
-        <Text color={COLORS.textDim}>No active tool executions</Text>
+        <Text color={theme.colors.textDim}>No active tool executions</Text>
       </Box>
     );
   }
@@ -51,7 +52,7 @@ export function ToolProgressPanel({ tools, maxHeight = 10, compact = false }: To
       {/* Active tools section */}
       {activeTools.length > 0 && (
         <Box flexDirection="column" marginBottom={1}>
-          <Text bold color={COLORS.system}>
+          <Text bold color={theme.colors.system}>
             Active ({activeTools.length})
           </Text>
           {activeTools.map(tool => (
@@ -63,7 +64,7 @@ export function ToolProgressPanel({ tools, maxHeight = 10, compact = false }: To
       {/* Completed tools section */}
       {completedTools.length > 0 && (
         <Box flexDirection="column">
-          <Text bold color={COLORS.textDim}>
+          <Text bold color={theme.colors.textDim}>
             Completed ({completedTools.length})
           </Text>
           {completedTools.slice(-3).map(tool => (
@@ -85,6 +86,7 @@ function CompactProgressView({
   completedTools: ToolProgress[];
   maxHeight: number;
 }) {
+  const { theme } = useTheme();
   const runningCount = activeTools.filter(t => t.status === "running").length;
   const pendingCount = activeTools.filter(t => t.status === "pending").length;
   const failedCount = completedTools.filter(t => t.status === "failed").length;
@@ -93,22 +95,22 @@ function CompactProgressView({
     <Box flexDirection="column" paddingX={1}>
       <Box>
         {runningCount > 0 && (
-          <Text color={COLORS.warning}>
+          <Text color={theme.colors.warning}>
             ⟳ {runningCount} running
           </Text>
         )}
         {pendingCount > 0 && (
           <>
-            <Text color={COLORS.textDim}> │ </Text>
-            <Text color={COLORS.textDim}>
+            <Text color={theme.colors.textDim}> │ </Text>
+            <Text color={theme.colors.textDim}>
               ⏳ {pendingCount} pending
             </Text>
           </>
         )}
         {failedCount > 0 && (
           <>
-            <Text color={COLORS.textDim}> │ </Text>
-            <Text color={COLORS.error}>
+            <Text color={theme.colors.textDim}> │ </Text>
+            <Text color={theme.colors.error}>
               ✗ {failedCount} failed
             </Text>
           </>
@@ -126,6 +128,7 @@ function CompactProgressView({
 }
 
 function ActiveToolRow({ tool }: { tool: ToolProgress }) {
+  const { theme } = useTheme();
   const elapsed = formatDuration(tool.elapsedMs);
   const progressBar = renderProgressBar(tool.progress, 20);
 
@@ -133,27 +136,27 @@ function ActiveToolRow({ tool }: { tool: ToolProgress }) {
     <Box flexDirection="column" marginY={1}>
       <Box justifyContent="space-between">
         <Box>
-          <Text color={getStatusColor(tool.status)}>
+          <Text color={getStatusColor(tool.status, theme)}>
             {getStatusIcon(tool.status)}
           </Text>
           <Text> </Text>
-          <Text bold color={COLORS.text}>
+          <Text bold color={theme.colors.text}>
             {tool.toolName}
           </Text>
         </Box>
-        <Text color={COLORS.textDim}>{elapsed}</Text>
+        <Text color={theme.colors.textDim}>{elapsed}</Text>
       </Box>
 
       {/* Progress bar */}
       <Box>
-        <Text color={COLORS.progressBar}>{progressBar}</Text>
-        <Text color={COLORS.textDim}> {tool.progress}%</Text>
+        <Text color={theme.colors.progressBar}>{progressBar}</Text>
+        <Text color={theme.colors.textDim}> {tool.progress}%</Text>
       </Box>
 
       {/* Live output preview */}
       {tool.output && (
         <Box marginLeft={2} marginTop={1}>
-          <Text color={COLORS.textDim} wrap="truncate-end">
+          <Text color={theme.colors.textDim} wrap="truncate-end">
             {tool.output.split("\n").pop()?.slice(0, 60)}
           </Text>
         </Box>
@@ -163,6 +166,7 @@ function ActiveToolRow({ tool }: { tool: ToolProgress }) {
 }
 
 function CompletedToolRow({ tool }: { tool: ToolProgress }) {
+  const { theme } = useTheme();
   const elapsed = tool.endTime
     ? formatDuration(tool.endTime - tool.startTime)
     : formatDuration(tool.elapsedMs);
@@ -170,33 +174,34 @@ function CompletedToolRow({ tool }: { tool: ToolProgress }) {
   return (
     <Box justifyContent="space-between" marginY={1}>
       <Box>
-        <Text color={getStatusColor(tool.status)}>
+        <Text color={getStatusColor(tool.status, theme)}>
           {getStatusIcon(tool.status)}
         </Text>
         <Text> </Text>
-        <Text color={COLORS.text}>{tool.toolName}</Text>
+        <Text color={theme.colors.text}>{tool.toolName}</Text>
       </Box>
       <Box>
         {tool.error && (
-          <Text color={COLORS.error} wrap="truncate-end">
+          <Text color={theme.colors.error} wrap="truncate-end">
             {tool.error.slice(0, 30)}
           </Text>
         )}
-        <Text color={COLORS.textDim}> {elapsed}</Text>
+        <Text color={theme.colors.textDim}> {elapsed}</Text>
       </Box>
     </Box>
   );
 }
 
 function CompactToolProgress({ tool }: { tool: ToolProgress }) {
+  const { theme } = useTheme();
   const progressBar = renderProgressBar(tool.progress, 15);
 
   return (
     <Box>
-      <Text color={COLORS.textDim}>{tool.toolName.slice(0, 15)}:</Text>
+      <Text color={theme.colors.textDim}>{tool.toolName.slice(0, 15)}:</Text>
       <Text> </Text>
-      <Text color={COLORS.progressBar}>{progressBar}</Text>
-      <Text color={COLORS.textDim}> {tool.progress}%</Text>
+      <Text color={theme.colors.progressBar}>{progressBar}</Text>
+      <Text color={theme.colors.textDim}> {tool.progress}%</Text>
     </Box>
   );
 }
@@ -213,14 +218,14 @@ function getStatusIcon(status: ToolProgress["status"]): string {
   }
 }
 
-function getStatusColor(status: ToolProgress["status"]): string {
+function getStatusColor(status: ToolProgress["status"], theme: { colors: Record<string, string> }): string {
   switch (status) {
-    case "pending": return COLORS.textDim;
-    case "running": return COLORS.warning;
-    case "completed": return COLORS.success;
-    case "failed": return COLORS.error;
-    case "cancelled": return COLORS.textDim;
-    default: return COLORS.text;
+    case "pending": return theme.colors.textDim;
+    case "running": return theme.colors.warning;
+    case "completed": return theme.colors.success;
+    case "failed": return theme.colors.error;
+    case "cancelled": return theme.colors.textDim;
+    default: return theme.colors.text;
   }
 }
 

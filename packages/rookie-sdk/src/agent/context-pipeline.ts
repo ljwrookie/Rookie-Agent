@@ -1,17 +1,20 @@
 // ─── Context Preprocessing Pipeline ──────────────────────────────
-// B6: 5-stage context compression pipeline
+// P4-T3: 5-stage context compression pipeline with Rust backend
 
 import type { Message } from "./types.js";
+import { NapiTransport } from "../transport/napi.js";
 
-// B6: Pipeline configuration
+// ─── Pipeline Configuration ──────────────────────────────────────
+
 export interface PipelineConfig {
-  maxToolResultTokens?: number;      // Stage 1: tool result budget
-  snipThreshold?: number;            // Stage 2: snip threshold
-  maxMessages?: number;              // Stage 4: context collapse threshold
-  compactThreshold?: number;         // Stage 5: auto-compact threshold
+  maxToolResultTokens?: number; // Stage 1: tool result budget
+  snipThreshold?: number; // Stage 2: snip threshold
+  maxMessages?: number; // Stage 4: context collapse threshold
+  compactThreshold?: number; // Stage 5: auto-compact threshold
+  contextWindow?: number; // Context window size
+  useNative?: boolean; // Use Rust native implementation
 }
 
-// B6: Pipeline stage result
 export interface PipelineResult {
   messages: Message[];
   stats: {
@@ -25,11 +28,83 @@ export interface PipelineResult {
   };
 }
 
-// B6: Main pipeline function
-export function runContextPipeline(
+// ─── NAPI Transport Instance ─────────────────────────────────────
+
+let napiTransport: NapiTransport | null = null;
+
+/**
+ * Initialize the context pipeline with NAPI transport.
+ * P4-T3: Uses Rust native implementation when available.
+ */
+export async function initContextPipeline(transport?: NapiTransport): Promise<void> {
+  if (transport) {
+    napiTransport = transport;
+  } else {
+    const { createTransport } = await import("../transport/napi.js");
+    napiTransport = await createTransport();
+  }
+}
+
+// ─── Main Pipeline Function ──────────────────────────────────────
+
+/**
+ * Run the 5-stage context pipeline.
+ * P4-T3: Delegates to Rust native implementation when available.
+ */
+export async function runContextPipeline(
   messages: Message[],
   config: PipelineConfig = {}
-): PipelineResult {
+): Promise<PipelineResult> {
+  // Try native implementation first
+  if (config.useNative !== false && napiTransport?.isConnected()) {
+    try {
+      return await runNativePipeline(messages, config);
+    } catch {
+      // Fall through to JS implementation
+    }
+  }
+
+  // JS fallback implementation
+  return runJSPipeline(messages, config);
+}
+
+/**
+ * Run pipeline using Rust native implementation.
+ */
+async function runNativePipeline(
+  messages: Message[],
+  config: PipelineConfig
+): Promise<PipelineResult> {
+  if (!napiTransport) {
+    throw new Error("NAPI transport not initialized");
+  }
+
+  const result = await napiTransport.runContextPipeline(messages, {
+    maxToolResultTokens: config.maxToolResultTokens,
+    snipThreshold: config.snipThreshold,
+    maxMessages: config.maxMessages,
+    compactThreshold: config.compactThreshold,
+    contextWindow: config.contextWindow,
+  });
+
+  return {
+    messages: result.messages,
+    stats: {
+      stage1ToolResults: result.stats.stage1ToolResults,
+      stage2Snipped: result.stats.stage2Snipped,
+      stage3Normalized: result.stats.stage3Normalized,
+      stage4Collapsed: result.stats.stage4Collapsed,
+      stage5Compacted: result.stats.stage5Compacted,
+      totalTokensBefore: result.stats.totalTokensBefore,
+      totalTokensAfter: result.stats.totalTokensAfter,
+    },
+  };
+}
+
+/**
+ * JS fallback implementation of the 5-stage pipeline.
+ */
+function runJSPipeline(messages: Message[], config: PipelineConfig): PipelineResult {
   const stats = {
     stage1ToolResults: 0,
     stage2Snipped: 0,
@@ -59,7 +134,7 @@ export function runContextPipeline(
   stats.stage4Collapsed = countAffected(result, "collapsed");
 
   // Stage 5: Autocompact - final compression
-  result = autocompact(result, config.compactThreshold ?? 0.8);
+  result = autocompact(result, config.compactThreshold ?? 0.8, config.contextWindow ?? 128000);
   stats.stage5Compacted = countAffected(result, "compacted");
 
   stats.totalTokensAfter = estimateTokens(result);
@@ -67,7 +142,9 @@ export function runContextPipeline(
   return { messages: result, stats };
 }
 
-// B6: Stage 1 - Apply tool result budget
+// ─── Pipeline Stages ─────────────────────────────────────────────
+
+/** Stage 1: Apply tool result budget */
 function applyToolResultBudget(messages: Message[], maxTokens: number): Message[] {
   return messages.map((msg) => {
     if (msg.role !== "tool") return msg;
@@ -84,13 +161,14 @@ function applyToolResultBudget(messages: Message[], maxTokens: number): Message[
 
     return {
       ...msg,
-      content: truncated + `\n\n[... truncated: showing ${maxTokens} of ~${estimatedTokens} tokens ...]`,
+      content:
+        truncated + `\n\n[... truncated: showing ${maxTokens} of ~${estimatedTokens} tokens ...]`,
       metadata: { ...msg.metadata, _pipeline: "tool_result_budget" },
     };
   });
 }
 
-// B6: Stage 2 - Snip compact
+/** Stage 2: Snip compact - truncate long messages */
 function snipCompact(messages: Message[], threshold: number): Message[] {
   return messages.map((msg) => {
     const content = msg.content || "";
@@ -116,7 +194,7 @@ function snipCompact(messages: Message[], threshold: number): Message[] {
   });
 }
 
-// B6: Stage 3 - Microcompact
+/** Stage 3: Microcompact - normalize whitespace */
 function microcompact(messages: Message[]): Message[] {
   return messages.map((msg) => {
     let content = msg.content || "";
@@ -139,14 +217,12 @@ function microcompact(messages: Message[]): Message[] {
     return {
       ...msg,
       content,
-      metadata: changed
-        ? { ...msg.metadata, _pipeline: "normalized" }
-        : msg.metadata,
+      metadata: changed ? { ...msg.metadata, _pipeline: "normalized" } : msg.metadata,
     };
   });
 }
 
-// B6: Stage 4 - Context collapse
+/** Stage 4: Context collapse - fold old conversations */
 function contextCollapse(messages: Message[], maxMessages: number): Message[] {
   if (messages.length <= maxMessages) return messages;
 
@@ -175,12 +251,11 @@ function contextCollapse(messages: Message[], maxMessages: number): Message[] {
   return messages;
 }
 
-// B6: Stage 5 - Autocompact
-function autocompact(messages: Message[], threshold: number): Message[] {
+/** Stage 5: Autocompact - final compression */
+function autocompact(messages: Message[], threshold: number, contextWindow: number): Message[] {
   const estimatedTokens = estimateTokens(messages);
-  const maxTokens = 128000; // Assume 128k context window
 
-  if (estimatedTokens < maxTokens * threshold) return messages;
+  if (estimatedTokens < contextWindow * threshold) return messages;
 
   // Need to compact - remove or summarize oldest non-system messages
   const systemMsgs = messages.filter((m) => m.role === "system");
@@ -199,7 +274,9 @@ function autocompact(messages: Message[], threshold: number): Message[] {
   return [...systemMsgs, summary, ...keptMsgs];
 }
 
-// B6: Helper - estimate tokens
+// ─── Helper Functions ────────────────────────────────────────────
+
+/** Estimate tokens (rough approximation) */
 function estimateTokens(messages: Message[]): number {
   let total = 0;
   for (const msg of messages) {
@@ -211,12 +288,12 @@ function estimateTokens(messages: Message[]): number {
   return total;
 }
 
-// B6: Helper - count messages affected by pipeline stage
+/** Count messages affected by pipeline stage */
 function countAffected(messages: Message[], stage: string): number {
   return messages.filter((m) => m.metadata?._pipeline === stage).length;
 }
 
-// B6: Pipeline logger
+/** Log pipeline stats */
 export function logPipelineStats(result: PipelineResult): void {
   const { stats } = result;
   console.log("Context Pipeline Stats:");
@@ -225,7 +302,9 @@ export function logPipelineStats(result: PipelineResult): void {
   console.log(`  Stage 3 (Normalize): ${stats.stage3Normalized} messages affected`);
   console.log(`  Stage 4 (Collapse): ${stats.stage4Collapsed} messages affected`);
   console.log(`  Stage 5 (Autocompact): ${stats.stage5Compacted} messages affected`);
-  console.log(`  Total: ${stats.totalTokensBefore} → ${stats.totalTokensAfter} tokens (${
-    Math.round((stats.totalTokensAfter / stats.totalTokensBefore) * 100)
-  }%)`);
+  console.log(
+    `  Total: ${stats.totalTokensBefore} → ${stats.totalTokensAfter} tokens (${Math.round(
+      (stats.totalTokensAfter / stats.totalTokensBefore) * 100
+    )}%)`
+  );
 }

@@ -5,6 +5,16 @@ import { randomBytes } from "node:crypto";
 import { Tool } from "../types.js";
 import { saveSnapshot } from "../snapshot.js";
 
+// Import Rust bindings (fallback to JS implementation if not available)
+let rustApplyPatch: typeof import("../../transport/napi.js").applyPatch | undefined;
+
+try {
+  const napi = await import("../../transport/napi.js");
+  rustApplyPatch = napi.applyPatch;
+} catch {
+  // Rust bindings not available, will use fallback
+}
+
 // ─── B9.2: Constants ───────────────────────────────────────────
 
 const MAX_EDIT_FILE_SIZE = 1 * 1024 * 1024 * 1024; // 1 GiB
@@ -324,7 +334,22 @@ export const editApplyDiffTool: Tool = {
 
     let patched: string;
     try {
-      patched = applyUnifiedDiff(source, diff);
+      // Try Rust patch engine first
+      if (rustApplyPatch) {
+        const result = rustApplyPatch(source, diff, { fuzzy: true });
+        if (result.success) {
+          patched = result.content;
+        } else {
+          // Build detailed error message
+          const failedHunks = result.failed_hunks.map((h: { hunk_index: number; old_start: number; reason: string }) =>
+            `Hunk ${h.hunk_index + 1} at line ${h.old_start}: ${h.reason}`
+          ).join("\n");
+          throw new Error(`Patch application failed:\n${failedHunks}`);
+        }
+      } else {
+        // Fallback to JS implementation
+        patched = applyUnifiedDiff(source, diff);
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
 
@@ -430,10 +455,8 @@ export const editAtomicWriteTool: Tool = {
       // Snapshot failure shouldn't block write
     }
 
-    // B9.2: Ensure content ends with newline
-    const normalizedContent = content.endsWith("\n") ? content : content + "\n";
-
-    const { backupPath } = await atomicWrite(filePath, normalizedContent, { backup });
+    // Preserve the provided content exactly (callers decide newline policy).
+    const { backupPath } = await atomicWrite(filePath, content, { backup });
 
     // B9.2: Update recorded mtime
     try {
@@ -443,7 +466,7 @@ export const editAtomicWriteTool: Tool = {
       // Ignore stat errors
     }
 
-    return `Wrote ${filePath} (${normalizedContent.length} chars)` + (backupPath ? ` — backup: ${backupPath}` : "");
+    return `Wrote ${filePath} (${content.length} chars)` + (backupPath ? ` — backup: ${backupPath}` : "");
   },
 };
 

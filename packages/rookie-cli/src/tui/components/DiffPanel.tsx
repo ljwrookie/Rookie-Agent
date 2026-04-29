@@ -4,7 +4,7 @@
 
 import { Box, Text } from "ink";
 import type { DiffFile } from "../types.js";
-import { COLORS } from "../types.js";
+import { useTheme } from "../hooks/useTheme.js";
 
 interface DiffPanelProps {
   diffs: DiffFile[];
@@ -20,19 +20,23 @@ const STATUS_ICON: Record<string, string> = {
   renamed: "→",
 };
 
-const STATUS_COLOR: Record<string, string> = {
-  added: COLORS.success,
-  modified: COLORS.warning,
-  deleted: COLORS.error,
-  renamed: COLORS.system,
-};
+function useStatusColor(theme: { colors: Record<string, string> }): Record<string, string> {
+  return {
+    added: theme.colors.success,
+    modified: theme.colors.warning,
+    deleted: theme.colors.error,
+    renamed: theme.colors.system,
+  };
+}
 
 export function DiffPanel({ diffs, selectedFileIdx, scrollOffset, maxHeight }: DiffPanelProps) {
+  const { theme } = useTheme();
+  const STATUS_COLOR = useStatusColor(theme);
   if (diffs.length === 0) {
     return (
       <Box flexDirection="column" paddingX={1}>
-        <Text color={COLORS.textDim}>No file changes to display.</Text>
-        <Text color={COLORS.textDim}>Changes will appear here as the agent modifies files.</Text>
+        <Text color={theme.colors.textDim}>No file changes to display.</Text>
+        <Text color={theme.colors.textDim}>Changes will appear here as the agent modifies files.</Text>
       </Box>
     );
   }
@@ -46,7 +50,7 @@ export function DiffPanel({ diffs, selectedFileIdx, scrollOffset, maxHeight }: D
         {diffs.slice(0, 8).map((df, idx) => {
           const active = idx === selectedFileIdx;
           const icon = STATUS_ICON[df.status] ?? "?";
-          const color = STATUS_COLOR[df.status] ?? COLORS.textDim;
+          const color = STATUS_COLOR[df.status] ?? theme.colors.textDim;
           return (
             <Box key={df.path} marginRight={1}>
               <Text
@@ -60,7 +64,7 @@ export function DiffPanel({ diffs, selectedFileIdx, scrollOffset, maxHeight }: D
           );
         })}
         {diffs.length > 8 && (
-          <Text color={COLORS.textDim}>+{diffs.length - 8} more</Text>
+          <Text color={theme.colors.textDim}>+{diffs.length - 8} more</Text>
         )}
       </Box>
 
@@ -85,6 +89,8 @@ function DiffFileContent({
   scrollOffset: number;
   maxLines: number;
 }) {
+  const { theme } = useTheme();
+  const STATUS_COLOR = useStatusColor(theme);
   // Flatten all hunks into displayable lines
   const allLines: { type: "header" | "add" | "remove" | "context"; text: string }[] = [];
 
@@ -107,19 +113,19 @@ function DiffFileContent({
   return (
     <Box flexDirection="column">
       <Box marginBottom={0}>
-        <Text color={STATUS_COLOR[file.status] ?? COLORS.textDim} bold>
+        <Text color={STATUS_COLOR[file.status] ?? theme.colors.textDim} bold>
           {file.path}
         </Text>
-        <Text color={COLORS.textDim}>
+        <Text color={theme.colors.textDim}>
           {" "}({file.status})
         </Text>
       </Box>
       {visible.map((line, i) => {
         const color =
-          line.type === "add" ? COLORS.success :
-          line.type === "remove" ? COLORS.error :
-          line.type === "header" ? COLORS.system :
-          COLORS.textDim;
+          line.type === "add" ? theme.colors.success :
+          line.type === "remove" ? theme.colors.error :
+          line.type === "header" ? theme.colors.system :
+          theme.colors.textDim;
         return (
           <Text key={scrollOffset + i} color={color} wrap="truncate-end">
             {line.text}
@@ -127,7 +133,7 @@ function DiffFileContent({
         );
       })}
       {scrollOffset + maxLines < allLines.length && (
-        <Text color={COLORS.textDim}>
+        <Text color={theme.colors.textDim}>
           ↓ {allLines.length - scrollOffset - maxLines} more lines (j/k to scroll)
         </Text>
       )}

@@ -26,6 +26,7 @@ export interface ThemeColors {
   spinner: string;
   progressBar: string;
   progressTrack: string;
+  [key: string]: string;
 }
 
 export interface Theme {

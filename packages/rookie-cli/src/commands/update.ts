@@ -1,7 +1,6 @@
 // Update command: Self-update functionality (P3-T4)
 
-import { execSync, spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { execSync } from "node:child_process";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);

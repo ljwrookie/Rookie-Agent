@@ -33,7 +33,13 @@ export interface RookieSettings {
   model?: {
     default?: string;
     providers?: Record<string, unknown>;
+    /** Currently selected provider id (e.g. `openai`, `anthropic`). */
+    provider?: string;
+    /** Currently selected model name within the active provider. */
+    model?: string;
   };
+  /** Per-provider API keys (provider id → key). */
+  apiKeys?: Record<string, string>;
   /** Skill enablement flags; { enabled: ["skillA", "!skillB"] } style. */
   skills?: {
     enabled?: string[];
@@ -239,4 +245,25 @@ function computeOrigins(
     }
   }
   return origins;
+}
+
+export interface SaveSettingsOptions extends LoadSettingsOptions {
+  /** Which layer to persist to. Defaults to `project`. */
+  layer?: SettingsLayer;
+}
+
+/**
+ * Persist a settings object to disk. Writes the *entire* settings payload to
+ * the chosen layer — merge semantics stay in the reader, so callers decide
+ * whether to diff or overwrite.
+ */
+export async function saveSettings(
+  settings: RookieSettings,
+  opts: SaveSettingsOptions = {},
+): Promise<void> {
+  const paths = resolveSettingsPaths(opts);
+  const layer: SettingsLayer = opts.layer ?? "project";
+  const target = paths[layer];
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.writeFile(target, JSON.stringify(settings, null, 2) + "\n", "utf-8");
 }

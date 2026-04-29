@@ -11,7 +11,7 @@ export interface GatewayConfig {
   /** Enable/disable this gateway */
   enabled: boolean;
   /** Webhook/connection credentials */
-  credentials: Record<string, string>;
+  credentials: Record<string, unknown>;
   /** Allowed channels/users (empty = all) */
   allowlist?: string[];
   /** Blocked channels/users */

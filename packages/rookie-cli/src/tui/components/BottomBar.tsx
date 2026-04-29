@@ -7,7 +7,7 @@
 import { useEffect, useState, useRef } from "react";
 import { Box, Text } from "ink";
 import type { TuiMode } from "../types.js";
-import { COLORS } from "../types.js";
+import { useTheme } from "../hooks/useTheme.js";
 import { useStatusLine } from "../hooks/useStatusLine.js";
 
 interface BottomBarProps {
@@ -20,6 +20,10 @@ interface BottomBarProps {
   streamStatus?: "idle" | "streaming" | "stalled" | "recovering";
   /** A7: Status line shell command */
   statusLineCommand?: string;
+  /** Navigation prefix hint (e.g. "g: c=chat p=plan...") */
+  prefixHint?: string | null;
+  /** Current overlay name */
+  overlay?: string | null;
 }
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -33,15 +37,23 @@ const MODE_HINTS: Record<string, Record<TuiMode, string>> = {
     review: "Enter send │ ↑↓ history │ Tab complete │ / commands │ Esc back",
     approve: "Enter send │ ↑↓ history │ Tab complete │ / commands │ Esc back",
     agents: "Enter send │ ↑↓ history │ Tab complete │ / commands │ Esc back",
+    model: "↑/↓ select │ Enter confirm │ Esc close",
+    checkpoint: "↑/↓ select │ Enter restore │ Esc close",
+    skill: "↑/↓ select │ Enter detail │ / search │ Esc close",
+    memory: "↑/↓ select │ / search │ Esc close",
   },
   unfocused: {
     chat: "j/k scroll │ Space toggle │ d diff │ l logs │ G latest │ ? help",
     plan: "j/k scroll │ Enter toggle │ 1 chat │ ? help │ Esc back",
-    diff: "j/k scroll │ a approve │ Tab file │ ? help │ Esc back",
+    diff: "j/k scroll │ o approve │ Tab file │ ? help │ Esc back",
     logs: "j/k scroll │ / filter │ ? help │ Esc back",
-    review: "j/k nav │ a approve │ x reject │ ? help │ Esc back",
-    approve: "a approve │ x reject │ j/k nav │ ? help │ Esc back",
+    review: "j/k nav │ o approve │ x reject │ ? help │ Esc back",
+    approve: "o approve │ x reject │ j/k nav │ ? help │ Esc back",
     agents: "j/k scroll │ ? help │ Esc back",
+    model: "↑/↓ select │ Enter confirm │ Esc close",
+    checkpoint: "↑/↓ select │ Enter restore │ Esc close",
+    skill: "↑/↓ select │ Enter detail │ / search │ Esc close",
+    memory: "↑/↓ select │ / search │ Esc close",
   },
   processing: {
     chat: "Ctrl+C interrupt │ j/k scroll │ G auto-follow",
@@ -49,12 +61,17 @@ const MODE_HINTS: Record<string, Record<TuiMode, string>> = {
     diff: "Ctrl+C interrupt │ j/k scroll",
     logs: "Ctrl+C interrupt │ j/k scroll",
     review: "Ctrl+C interrupt",
-    approve: "Ctrl+C interrupt │ a approve │ x reject",
+    approve: "Ctrl+C interrupt │ o approve │ x reject",
     agents: "Ctrl+C interrupt",
+    model: "Esc close",
+    checkpoint: "Esc close",
+    skill: "Esc close",
+    memory: "Esc close",
   },
 };
 
-export function BottomBar({ mode, isProcessing, statusText, tokensUsed, costUsd, inputFocused = true, streamStatus = "idle", statusLineCommand }: BottomBarProps) {
+export function BottomBar({ mode, isProcessing, statusText, tokensUsed, costUsd, inputFocused = true, streamStatus = "idle", statusLineCommand, prefixHint, overlay }: BottomBarProps) {
+  const { theme } = useTheme();
   // A7: Status line hook
   const { output: statusLineOutput } = useStatusLine({
     command: statusLineCommand,
@@ -96,12 +113,13 @@ export function BottomBar({ mode, isProcessing, statusText, tokensUsed, costUsd,
   const spinner = SPINNER_FRAMES[frame] ?? "⠋";
   // A1: Stream stall detection visual indicators
   const indicator = streamStatus === "stalled" ? "⏳" : streamStatus === "recovering" ? "🔄" : isProcessing ? spinner : "●";
-  const indicatorColor = streamStatus === "stalled" ? COLORS.error : streamStatus === "recovering" ? COLORS.warning : isProcessing ? COLORS.warning : COLORS.success;
+  const indicatorColor = streamStatus === "stalled" ? theme.colors.error : streamStatus === "recovering" ? theme.colors.warning : isProcessing ? theme.colors.warning : theme.colors.success;
   const displayStatusText = streamStatus === "stalled" ? "⏳ 等待模型响应..." : streamStatus === "recovering" ? "🔄 正在恢复..." : statusText;
 
   // Dynamic hints based on state
   const hintKey = isProcessing ? "processing" : (inputFocused ? "focused" : "unfocused");
-  const hints = MODE_HINTS[hintKey]?.[mode] ?? MODE_HINTS.unfocused[mode];
+  const baseHints = MODE_HINTS[hintKey]?.[mode] ?? MODE_HINTS.unfocused[mode];
+  const hints = prefixHint ?? (overlay ? `Overlay: ${overlay} | Esc/Ctrl+O to close` : baseHints);
 
   return (
     <Box paddingX={1} height={1} justifyContent="space-between">
@@ -114,34 +132,34 @@ export function BottomBar({ mode, isProcessing, statusText, tokensUsed, costUsd,
 
       {/* Center: mode-specific hints */}
       <Box>
-        <Text color={COLORS.textDim}>{hints}</Text>
+        <Text color={theme.colors.textDim}>{hints}</Text>
       </Box>
 
       {/* Right: status line output + tokens/cost/rate */}
       <Box>
         {/* A7: Status line output */}
         {statusLineOutput && (
-          <Text color={COLORS.textDim}>
+          <Text color={theme.colors.textDim}>
             {statusLineOutput}
           </Text>
         )}
         {statusLineOutput && (tokensUsed !== undefined || costUsd !== undefined) && (
-          <Text color={COLORS.textDim}> │ </Text>
+          <Text color={theme.colors.textDim}> │ </Text>
         )}
         {tokensUsed !== undefined && (
-          <Text color={COLORS.textDim}>
+          <Text color={theme.colors.textDim}>
             {tokensUsed.toLocaleString()} tok
           </Text>
         )}
         {tokPerSec !== null && isProcessing && (
-          <Text color={COLORS.textDim}>
+          <Text color={theme.colors.textDim}>
             {" "}({tokPerSec}/s)
           </Text>
         )}
         {costUsd !== undefined && (
           <>
-            <Text color={COLORS.textDim}> │ </Text>
-            <Text color={COLORS.textDim}>
+            <Text color={theme.colors.textDim}> │ </Text>
+            <Text color={theme.colors.textDim}>
               ${costUsd.toFixed(4)}
             </Text>
           </>

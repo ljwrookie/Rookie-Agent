@@ -1,5 +1,9 @@
 import { startTuiCodeMode } from "../tui/index.js";
 
-export async function startCodeMode(): Promise<void> {
-  await startTuiCodeMode();
+export interface CodeModeOptions {
+  record?: boolean;
+}
+
+export async function startCodeMode(options: CodeModeOptions = {}): Promise<void> {
+  await startTuiCodeMode(options);
 }

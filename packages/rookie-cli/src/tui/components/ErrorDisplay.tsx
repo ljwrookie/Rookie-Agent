@@ -3,7 +3,7 @@
 
 import { Box, Text } from "ink";
 import type { StructuredError } from "../types.js";
-import { COLORS } from "../types.js";
+import { useTheme } from "../hooks/useTheme.js";
 
 interface ErrorDisplayProps {
   errors: StructuredError[];
@@ -16,11 +16,13 @@ const SEV_ICON: Record<string, string> = {
   fatal: "☠",
 };
 
-const SEV_COLOR: Record<string, string> = {
-  warning: COLORS.warning,
-  error: COLORS.error,
-  fatal: "redBright",
-};
+function useSevColor(theme: { colors: Record<string, string> }): Record<string, string> {
+  return {
+    warning: theme.colors.warning,
+    error: theme.colors.error,
+    fatal: "redBright",
+  };
+}
 
 export function ErrorDisplay({ errors, maxErrors = 3 }: ErrorDisplayProps) {
   const recent = errors.slice(-maxErrors);
@@ -37,8 +39,10 @@ export function ErrorDisplay({ errors, maxErrors = 3 }: ErrorDisplayProps) {
 }
 
 function ErrorCard({ error }: { error: StructuredError }) {
+  const { theme } = useTheme();
+  const SEV_COLOR = useSevColor(theme);
   const icon = SEV_ICON[error.severity] ?? "?";
-  const color = SEV_COLOR[error.severity] ?? COLORS.error;
+  const color = SEV_COLOR[error.severity] ?? theme.colors.error;
 
   return (
     <Box
@@ -53,8 +57,8 @@ function ErrorCard({ error }: { error: StructuredError }) {
         <Text color={color} bold>
           {icon} {error.severity.toUpperCase()}
         </Text>
-        <Text color={COLORS.textDim}> │ </Text>
-        <Text color={COLORS.text} bold wrap="truncate-end">
+        <Text color={theme.colors.textDim}> │ </Text>
+        <Text color={theme.colors.text} bold wrap="truncate-end">
           {error.title}
         </Text>
       </Box>
@@ -62,25 +66,25 @@ function ErrorCard({ error }: { error: StructuredError }) {
       {/* Cause */}
       {error.cause && (
         <Box>
-          <Text color={COLORS.textDim}>Cause: </Text>
-          <Text color={COLORS.text} wrap="truncate-end">{error.cause}</Text>
+          <Text color={theme.colors.textDim}>Cause: </Text>
+          <Text color={theme.colors.text} wrap="truncate-end">{error.cause}</Text>
         </Box>
       )}
 
       {/* Suggestion */}
       {error.suggestion && (
         <Box>
-          <Text color={COLORS.system}>→ </Text>
-          <Text color={COLORS.system} wrap="truncate-end">{error.suggestion}</Text>
+          <Text color={theme.colors.system}>→ </Text>
+          <Text color={theme.colors.system} wrap="truncate-end">{error.suggestion}</Text>
         </Box>
       )}
 
       {/* Retry hint */}
       {error.retryable && (
         <Box>
-          <Text color={COLORS.textDim}>Press </Text>
-          <Text bold color={COLORS.system}>r</Text>
-          <Text color={COLORS.textDim}> to retry</Text>
+          <Text color={theme.colors.textDim}>Press </Text>
+          <Text bold color={theme.colors.system}>r</Text>
+          <Text color={theme.colors.textDim}> to retry</Text>
         </Box>
       )}
     </Box>

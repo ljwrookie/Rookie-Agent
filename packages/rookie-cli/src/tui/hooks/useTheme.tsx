@@ -1,9 +1,9 @@
 // A3: Theme context hook for TUI
 // Provides theme state and switching functionality
 
-import React, { createContext, useContext, useState, useCallback, useEffect } from "react";
+import React, { createContext, useContext, useState, useCallback } from "react";
 import type { ThemeName, Theme } from "../theme.js";
-import { themes, defaultTheme, getThemeFromEnv } from "../theme.js";
+import { themes, getThemeFromEnv } from "../theme.js";
 
 interface ThemeContextValue {
   themeName: ThemeName;
@@ -33,12 +33,8 @@ export function ThemeProvider({ children, initialTheme }: ThemeProviderProps) {
   const setTheme = useCallback((name: ThemeName) => {
     if (themes[name]) {
       setThemeName(name);
-      // Persist to localStorage if available
-      try {
-        localStorage.setItem("rookie-theme", name);
-      } catch {
-        // Ignore storage errors
-      }
+      // FIX #1: Removed localStorage persistence - Node CLI has no localStorage
+      // Theme persistence should be implemented via file-based settings
     }
   }, []);
 
@@ -49,17 +45,8 @@ export function ThemeProvider({ children, initialTheme }: ThemeProviderProps) {
     setTheme(themeOrder[nextIndex]);
   }, [themeName, setTheme]);
 
-  // Load persisted theme on mount
-  useEffect(() => {
-    try {
-      const persisted = localStorage.getItem("rookie-theme");
-      if (persisted && themes[persisted as ThemeName]) {
-        setThemeName(persisted as ThemeName);
-      }
-    } catch {
-      // Ignore storage errors
-    }
-  }, []);
+  // FIX #1: Removed localStorage load on mount - Node CLI has no localStorage
+  // Theme initialization is done via getThemeFromEnv() above
 
   const value: ThemeContextValue = {
     themeName,

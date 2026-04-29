@@ -4,7 +4,7 @@
 
 import { Box, Text } from "ink";
 import type { StreamEvent, StructuredError, LongTask } from "../types.js";
-import { COLORS } from "../types.js";
+import { useTheme } from "../hooks/useTheme.js";
 
 interface LogPanelProps {
   events: StreamEvent[];
@@ -15,6 +15,7 @@ interface LogPanelProps {
 }
 
 export function LogPanel({ events, errors, longTasks, maxHeight, scrollOffset }: LogPanelProps) {
+  const { theme } = useTheme();
   // Merge all log-worthy items into a timeline
   const logItems: LogItem[] = [];
 
@@ -65,7 +66,7 @@ export function LogPanel({ events, errors, longTasks, maxHeight, scrollOffset }:
   if (logItems.length === 0) {
     return (
       <Box flexDirection="column" paddingX={1}>
-        <Text color={COLORS.textDim}>No logs yet.</Text>
+        <Text color={theme.colors.textDim}>No logs yet.</Text>
       </Box>
     );
   }
@@ -75,13 +76,13 @@ export function LogPanel({ events, errors, longTasks, maxHeight, scrollOffset }:
   for (const item of logItems) {
     const time = fmtTime(item.timestamp);
     const badge = item.type === "error" ? "ERR" : item.type === "task" ? "TASK" : "LOG";
-    const color = item.severity === "error" ? COLORS.error :
-                  item.severity === "warning" ? COLORS.warning : COLORS.textDim;
+    const color = item.severity === "error" ? theme.colors.error :
+                  item.severity === "warning" ? theme.colors.warning : theme.colors.textDim;
 
     lines.push({ color, text: `${time} [${badge}] ${item.title}` });
     if (item.content) {
       for (const line of item.content.split("\n").slice(0, 20)) {
-        lines.push({ color: COLORS.textDim, text: `  ${line}` });
+        lines.push({ color: theme.colors.textDim, text: `  ${line}` });
       }
     }
   }
@@ -96,7 +97,7 @@ export function LogPanel({ events, errors, longTasks, maxHeight, scrollOffset }:
         </Text>
       ))}
       {scrollOffset + maxHeight < lines.length && (
-        <Text color={COLORS.textDim}>
+        <Text color={theme.colors.textDim}>
           ↓ {lines.length - scrollOffset - maxHeight} more (j/k to scroll)
         </Text>
       )}

@@ -86,7 +86,7 @@ export class Scheduler {
     await this.persist();
     this.startCronJob(task);
 
-    this.emit({ type: "task_scheduled", task });
+    this.emit({ type: "task_scheduled", taskId: task.id, timestamp: this.options.now() });
     return { success: true, task };
   }
 
@@ -98,7 +98,7 @@ export class Scheduler {
     this.store.tasks.splice(idx, 1);
     await this.persist();
 
-    this.emit({ type: "task_cancelled", taskId });
+    this.emit({ type: "task_cancelled", taskId, timestamp: this.options.now() });
     return true;
   }
 

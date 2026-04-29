@@ -141,7 +141,9 @@ export function createWebFetchTool(deps: WebFetchDeps = {}): Tool {
           reader = reader.slice(startIndex);
         }
         if (reader.length > maxLength) {
-          reader = reader.slice(0, maxLength) + `\n\n[... truncated, showing ${maxLength} of ${totalLength} characters]`;
+          reader =
+            reader.slice(0, maxLength) +
+            `\n\n[truncated, showing ${maxLength} of ${totalLength} characters]`;
         }
 
         // B9: Also respect MAX_BYTES for initial fetch

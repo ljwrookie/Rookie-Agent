@@ -21,6 +21,7 @@ Available tools:
 - search_code: Search the codebase for relevant code
 - git_status: Check git status
 - git_diff: View git diff
+- AskUserQuestion: Ask the user a question when you need clarification, confirmation, or a choice between options
 
 Guidelines:
 - Prefer file_edit over file_write for modifying existing files
@@ -36,6 +37,7 @@ Guidelines:
     "search_code",
     "git_status",
     "git_diff",
+    "AskUserQuestion",
   ];
 
   async *run(input: AgentInput, context: AgentContext): AsyncGenerator<AgentEvent> {

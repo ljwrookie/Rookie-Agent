@@ -3,14 +3,13 @@
 import { Command } from "commander";
 import {
   StdioTransport,
-  SkillRegistry,
   AgentOrchestrator,
   CoderAgent,
   ExplorerAgent,
   resolveCoreBinary,
 } from "@rookie/agent-sdk";
 // repl.ts deleted - using TUI mode only
-import { startCodeMode } from "./commands/code.js";
+import { startCodeMode, type CodeModeOptions } from "./commands/code.js";
 import { runInit } from "./commands/init.js";
 import { runResume } from "./commands/resume.js";
 import { runProgress } from "./commands/progress.js";
@@ -21,6 +20,9 @@ import { runConfigShow } from "./commands/config.js";
 import { doctorCommand } from "./commands/doctor.js";
 import { updateCommand, versionCommand } from "./commands/update.js";
 import { runMemoryShow } from "./commands/memory.js";
+import { registerSkillCommands } from "./commands/skill.js";
+import { registerModelCommands } from "./commands/model.js";
+import { createVoiceCommand } from "./commands/voice.js";
 
 const program = new Command();
 
@@ -36,12 +38,22 @@ program
   .option("-p, --prompt [text]", "Run a single prompt (reads from stdin if no text given)")
   .option("-o, --output-format <format>", "Output format: text | json | stream-json", "text")
   .option("--model <model>", "Model to use (e.g. gpt-4o, claude-sonnet-4)")
-  .option("--agent <agent>", "Agent to use: coder | explorer | reviewer | architect", "coder");
+  .option("--agent <agent>", "Agent to use: coder | explorer | reviewer | architect", "coder")
+  .option("--record", "Record session transcript for later replay");
 
 program
   .command("chat")
   .description("Start interactive chat")
-  .action(async () => {
+  .option("--record", "Record session transcript for later replay")
+  .action(async (opts: { record?: boolean }) => {
+    // P4.9: v2 TUI is the default; ROOKIE_TUI=v1 would use legacy (not implemented)
+    if (ROOKIE_TUI === "v2") {
+      const { startTuiCodeMode } = await import("./tui/index.js");
+      await startTuiCodeMode({ record: opts.record });
+      return;
+    }
+
+    // Legacy fallback (simple readline)
     const transport = new StdioTransport({
       command: resolveCoreBinary(),
       args: [],
@@ -75,8 +87,12 @@ program
 program
   .command("code")
   .description("Start coding assistant mode")
-  .action(async () => {
-    await startCodeMode();
+  .option("--record", "Record session transcript for later replay")
+  .action(async (opts: { record?: boolean }) => {
+    const codeOpts: CodeModeOptions = {
+      record: opts.record,
+    };
+    await startCodeMode(codeOpts);
   });
 
 program
@@ -132,59 +148,6 @@ program
 
     await transport.stop();
   });
-
-// ── Skill management commands ───────────────────────────
-
-program
-  .command("skill")
-  .description("Manage skills")
-  .addCommand(
-    new Command("list")
-      .description("List all installed skills")
-      .action(async () => {
-        const registry = new SkillRegistry();
-        await registry.loadFromDisk();
-        const skills = registry.list();
-        if (skills.length === 0) {
-          console.log("No skills installed.");
-          return;
-        }
-        console.log("Installed skills:");
-        for (const skill of skills) {
-          console.log(`  ${skill.name} v${skill.version} - ${skill.description}`);
-        }
-      })
-  )
-  .addCommand(
-    new Command("import")
-      .description("Import a skill from URL or file")
-      .argument("<url>", "URL or file path to skill")
-      .action(async (url: string) => {
-        const registry = new SkillRegistry();
-        await registry.loadFromDisk();
-        try {
-          const skill = await registry.importFromUrl(url);
-          console.log(`Imported skill: ${skill.name} v${skill.version}`);
-        } catch (e) {
-          console.error("Failed to import skill:", e);
-        }
-      })
-  )
-  .addCommand(
-    new Command("export")
-      .description("Export a skill to JSON")
-      .argument("<name>", "Skill name")
-      .action(async (name: string) => {
-        const registry = new SkillRegistry();
-        await registry.loadFromDisk();
-        try {
-          const json = await registry.exportSkill(name);
-          console.log(json);
-        } catch (e) {
-          console.error("Failed to export skill:", e);
-        }
-      })
-  );
 
 // ── Agent management commands ───────────────────────────
 
@@ -515,6 +478,18 @@ program
     await versionCommand();
   });
 
+// ── Skill management commands (P8-T4) ───────────────────
+
+registerSkillCommands(program);
+
+// ── Model provider management ───────────────────────────
+
+registerModelCommands(program);
+
+// ── Voice (TTS/STT) commands ────────────────────────────
+
+program.addCommand(createVoiceCommand());
+
 // ── Pipe support handler ────────────────────────────────
 
 async function handlePipeMode(promptText: string | true | undefined, opts: any): Promise<void> {
@@ -813,6 +788,14 @@ async function runAgentParallel(agentNames: string[], task: string): Promise<voi
 
 // ── Main entry point ────────────────────────────────────
 
+// P4.9: Feature flag ROOKIE_TUI=v2 controls TUI version
+// - unset or "v1": legacy TUI (not implemented, falls back to v2)
+// - "v2": new TUI with overlays, navigation stack, semantic keyboard routing
+const ROOKIE_TUI = process.env.ROOKIE_TUI || "v2";
+if (ROOKIE_TUI !== "v2" && ROOKIE_TUI !== "v1") {
+  console.warn(`Warning: Unknown ROOKIE_TUI value "${ROOKIE_TUI}", defaulting to v2`);
+}
+
 // Handle -p flag before commander parses subcommands
 const args = process.argv.slice(2);
 const pIndex = args.findIndex((a) => a === "-p" || a === "--prompt");
@@ -839,7 +822,7 @@ if (pIndex !== -1) {
     process.exit(1);
   });
 } else {
-  // Default action - start chat
+  // Default action - start chat (v2 TUI)
   if (process.argv.length === 2) {
     process.argv.push("chat");
   }

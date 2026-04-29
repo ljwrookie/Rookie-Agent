@@ -9,7 +9,7 @@
 import React from "react";
 import { Box, Text } from "ink";
 import type { StreamEvent, EventLane } from "../types.js";
-import { COLORS } from "../types.js";
+import { useTheme } from "../hooks/useTheme.js";
 
 interface EventStreamProps {
   events: StreamEvent[];
@@ -30,22 +30,28 @@ const TYPE_ICON: Record<string, string> = {
   user: "❯",
 };
 
-const SEVERITY_COLOR: Record<string, string> = {
-  info: COLORS.textDim,
-  success: COLORS.success,
-  warning: COLORS.warning,
-  error: COLORS.error,
-};
+function useSeverityColor(theme: { colors: Record<string, string> }): Record<string, string> {
+  return {
+    info: theme.colors.textDim,
+    success: theme.colors.success,
+    warning: theme.colors.warning,
+    error: theme.colors.error,
+  };
+}
 
 // A6: Lane configuration with colors and labels
-const LANE_CONFIG: Record<EventLane, { label: string; color: string; borderColor: string }> = {
-  main: { label: "MAIN", color: COLORS.text, borderColor: COLORS.system },
-  system: { label: "SYSTEM", color: COLORS.textDim, borderColor: "gray" },
-  background: { label: "BG", color: COLORS.warning, borderColor: "yellow" },
-  notification: { label: "NOTIFY", color: COLORS.success, borderColor: "green" },
-};
+function useLaneConfig(theme: { colors: Record<string, string> }): Record<EventLane, { label: string; color: string; borderColor: string }> {
+  return {
+    main: { label: "MAIN", color: theme.colors.text, borderColor: theme.colors.system },
+    system: { label: "SYSTEM", color: theme.colors.textDim, borderColor: "gray" },
+    background: { label: "BG", color: theme.colors.warning, borderColor: "yellow" },
+    notification: { label: "NOTIFY", color: theme.colors.success, borderColor: "green" },
+  };
+}
 
 export function EventStream({ events, selectedIdx, maxHeight, lane, showLanes, multiLane }: EventStreamProps) {
+  const { theme } = useTheme();
+  const LANE_CONFIG = useLaneConfig(theme);
   // A6: Filter events by lane if specified
   const filteredEvents = lane
     ? events.filter(ev => (ev.lane ?? "main") === lane)
@@ -54,7 +60,7 @@ export function EventStream({ events, selectedIdx, maxHeight, lane, showLanes, m
   if (filteredEvents.length === 0) {
     return (
       <Box flexDirection="column" paddingX={1}>
-        <Text color={COLORS.textDim}>No events yet. Type a message to begin.</Text>
+        <Text color={theme.colors.textDim}>No events yet. Type a message to begin.</Text>
       </Box>
     );
   }
@@ -92,7 +98,7 @@ export function EventStream({ events, selectedIdx, maxHeight, lane, showLanes, m
       {/* Scroll-up indicator */}
       {above > 0 && (
         <Box>
-          <Text color={COLORS.textDim}>↑ {above} event{above > 1 ? "s" : ""} above (k/PageUp)</Text>
+          <Text color={theme.colors.textDim}>↑ {above} event{above > 1 ? "s" : ""} above (k/PageUp)</Text>
         </Box>
       )}
 
@@ -112,7 +118,7 @@ export function EventStream({ events, selectedIdx, maxHeight, lane, showLanes, m
       {/* Scroll-down indicator */}
       {below > 0 && (
         <Box>
-          <Text color={COLORS.textDim}>↓ {below} event{below > 1 ? "s" : ""} below (j/PageDown)</Text>
+          <Text color={theme.colors.textDim}>↓ {below} event{below > 1 ? "s" : ""} below (j/PageDown)</Text>
         </Box>
       )}
     </Box>
@@ -128,6 +134,8 @@ interface MultiLaneEventStreamProps {
 }
 
 function MultiLaneEventStream({ events, selectedIdx, maxHeight, showLanes }: MultiLaneEventStreamProps) {
+  const { theme } = useTheme();
+  const LANE_CONFIG = useLaneConfig(theme);
   // Group events by lane
   const laneEvents: Record<EventLane, StreamEvent[]> = {
     main: [],
@@ -213,10 +221,12 @@ interface LaneEventListProps {
 }
 
 function LaneEventList({ events, selectedIdx, maxHeight }: LaneEventListProps) {
+  const { theme } = useTheme();
+  const SEVERITY_COLOR = useSeverityColor(theme);
   if (events.length === 0) {
     return (
       <Box>
-        <Text color={COLORS.textDim} dimColor>(empty)</Text>
+        <Text color={theme.colors.textDim} dimColor>(empty)</Text>
       </Box>
     );
   }
@@ -230,15 +240,15 @@ function LaneEventList({ events, selectedIdx, maxHeight }: LaneEventListProps) {
         const globalIdx = events.indexOf(ev);
         const isSelected = globalIdx === selectedIdx;
         const icon = TYPE_ICON[ev.type] ?? "·";
-        const sevColor = SEVERITY_COLOR[ev.severity] ?? COLORS.textDim;
+        const sevColor = SEVERITY_COLOR[ev.severity] ?? theme.colors.textDim;
 
         return (
           <Box key={ev.id}>
-            <Text color={isSelected ? COLORS.system : undefined}>
+            <Text color={isSelected ? theme.colors.system : undefined}>
               {isSelected ? "▸" : " "}
             </Text>
             <Text color={sevColor}>{icon} </Text>
-            <Text color={ev.severity === "error" ? COLORS.error : COLORS.text} wrap="truncate-end">
+            <Text color={ev.severity === "error" ? theme.colors.error : theme.colors.text} wrap="truncate-end">
               {ev.title.slice(0, 40)}{ev.title.length > 40 ? "..." : ""}
             </Text>
           </Box>
@@ -260,8 +270,11 @@ interface EventRowProps {
 }
 
 function EventRow({ event, selected, showLaneIndicator }: EventRowProps) {
+  const { theme } = useTheme();
+  const SEVERITY_COLOR = useSeverityColor(theme);
+  const LANE_CONFIG = useLaneConfig(theme);
   const icon = TYPE_ICON[event.type] ?? "·";
-  const sevColor = SEVERITY_COLOR[event.severity] ?? COLORS.textDim;
+  const sevColor = SEVERITY_COLOR[event.severity] ?? theme.colors.textDim;
   const timeStr = fmtTime(event.timestamp);
   const durationStr = event.durationMs ? ` ${fmtDuration(event.durationMs)}` : "";
   const isResponse = isLlmResponse(event);
@@ -271,7 +284,7 @@ function EventRow({ event, selected, showLaneIndicator }: EventRowProps) {
       {/* Header line */}
       <Box>
         {/* Selection indicator */}
-        <Text color={selected ? COLORS.system : undefined}>
+        <Text color={selected ? theme.colors.system : undefined}>
           {selected ? "▸" : " "}
         </Text>
 
@@ -281,23 +294,23 @@ function EventRow({ event, selected, showLaneIndicator }: EventRowProps) {
             <Text color={LANE_CONFIG[event.lane].borderColor}>
               {LANE_CONFIG[event.lane].label.slice(0, 2)}
             </Text>
-            <Text color={COLORS.textDim}> </Text>
+            <Text color={theme.colors.textDim}> </Text>
           </>
         )}
 
         {/* Time */}
-        <Text color={COLORS.textDim}>{timeStr} </Text>
+        <Text color={theme.colors.textDim}>{timeStr} </Text>
 
         {/* Type icon */}
         <Text color={sevColor}>{icon} </Text>
 
         {/* For LLM responses: show a short label on the header line */}
         {isResponse ? (
-          <Text color={COLORS.assistant} bold>Assistant</Text>
+          <Text color={theme.colors.assistant} bold>Assistant</Text>
         ) : (
           /* Non-response events: title on one line, truncated */
           <Text
-            color={event.severity === "error" ? COLORS.error : COLORS.text}
+            color={event.severity === "error" ? theme.colors.error : theme.colors.text}
             bold={event.type === "intent" || event.type === "error"}
             wrap="truncate-end"
           >
@@ -308,19 +321,19 @@ function EventRow({ event, selected, showLaneIndicator }: EventRowProps) {
         {/* Tool name badge */}
         {event.toolName && (
           <>
-            <Text color={COLORS.textDim}> </Text>
-            <Text color={COLORS.toolName}>[{event.toolName}]</Text>
+            <Text color={theme.colors.textDim}> </Text>
+            <Text color={theme.colors.toolName}>[{event.toolName}]</Text>
           </>
         )}
 
         {/* Duration */}
         {durationStr && (
-          <Text color={COLORS.textDim}>{durationStr}</Text>
+          <Text color={theme.colors.textDim}>{durationStr}</Text>
         )}
 
         {/* Collapse indicator */}
         {event.detail && (
-          <Text color={COLORS.textDim}>
+          <Text color={theme.colors.textDim}>
             {event.collapsed ? " ▶" : " ▼"}
           </Text>
         )}
@@ -337,12 +350,12 @@ function EventRow({ event, selected, showLaneIndicator }: EventRowProps) {
       {!isResponse && !event.collapsed && event.detail && (
         <Box paddingLeft={4} flexDirection="column">
           {event.detail.split("\n").slice(0, 20).map((line, i) => (
-            <Text key={i} color={COLORS.textDim} wrap="truncate-end">
+            <Text key={i} color={theme.colors.textDim} wrap="truncate-end">
               {line}
             </Text>
           ))}
           {event.detail.split("\n").length > 20 && (
-            <Text color={COLORS.textDim}>... ({event.detail.split("\n").length - 20} more lines)</Text>
+            <Text color={theme.colors.textDim}>... ({event.detail.split("\n").length - 20} more lines)</Text>
           )}
         </Box>
       )}
@@ -354,6 +367,7 @@ function EventRow({ event, selected, showLaneIndicator }: EventRowProps) {
 // Handles: paragraphs, **bold**, `code`, ```code blocks```, - lists,
 // numbered lists, [link](url), > blockquotes, --- horizontal rules
 function renderMarkdownLite(text: string): React.ReactNode[] {
+  const { theme } = useTheme();
   const lines = text.split("\n");
   const nodes: React.ReactNode[] = [];
   let inCodeBlock = false;
@@ -371,14 +385,14 @@ function renderMarkdownLite(text: string): React.ReactNode[] {
         nodes.push(
           <Box key={`cb-${blockIdx++}`} flexDirection="column" marginY={0} paddingLeft={1} borderStyle="single" borderColor="gray" borderLeft borderTop={false} borderRight={false} borderBottom={false}>
             {codeBlockLang && (
-              <Text color={COLORS.textDim} dimColor>{codeBlockLang}</Text>
+              <Text color={theme.colors.textDim} dimColor>{codeBlockLang}</Text>
             )}
             {codeBlockLines.map((cl, ci) => {
               // Diff-style coloring
               if (codeBlockLang === "diff") {
-                const color = cl.startsWith("+") ? COLORS.success :
-                              cl.startsWith("-") ? COLORS.error :
-                              cl.startsWith("@") ? COLORS.system : "greenBright";
+                const color = cl.startsWith("+") ? theme.colors.success :
+                              cl.startsWith("-") ? theme.colors.error :
+                              cl.startsWith("@") ? theme.colors.system : "greenBright";
                 return <Text key={ci} color={color} wrap="truncate-end">{cl}</Text>;
               }
               return <Text key={ci} color="greenBright" wrap="truncate-end">{cl}</Text>;
@@ -412,7 +426,7 @@ function renderMarkdownLite(text: string): React.ReactNode[] {
       const content = line.replace(/^#{1,3}\s+/, "");
       nodes.push(
         <Box key={i}>
-          <Text bold color={level === 1 ? COLORS.system : COLORS.text}>
+          <Text bold color={level === 1 ? theme.colors.system : theme.colors.text}>
             {renderInlineElements(content, `h-${i}`)}
           </Text>
         </Box>
@@ -427,8 +441,8 @@ function renderMarkdownLite(text: string): React.ReactNode[] {
       if (numMatch) {
         nodes.push(
           <Box key={i} paddingLeft={indent}>
-            <Text color={COLORS.textDim}>{numMatch[1]}. </Text>
-            <Text color={COLORS.text} wrap="wrap">{renderInlineElements(numMatch[2] ?? "", `nl-${i}`)}</Text>
+            <Text color={theme.colors.textDim}>{numMatch[1]}. </Text>
+            <Text color={theme.colors.text} wrap="wrap">{renderInlineElements(numMatch[2] ?? "", `nl-${i}`)}</Text>
           </Box>
         );
         continue;
@@ -441,8 +455,8 @@ function renderMarkdownLite(text: string): React.ReactNode[] {
       const content = line.replace(/^\s*[-*]\s+/, "");
       nodes.push(
         <Box key={i} paddingLeft={indent}>
-          <Text color={COLORS.textDim}>• </Text>
-          <Text color={COLORS.text} wrap="wrap">{renderInlineElements(content, `li-${i}`)}</Text>
+          <Text color={theme.colors.textDim}>• </Text>
+          <Text color={theme.colors.text} wrap="wrap">{renderInlineElements(content, `li-${i}`)}</Text>
         </Box>
       );
       continue;
@@ -452,8 +466,8 @@ function renderMarkdownLite(text: string): React.ReactNode[] {
     if (/^\s*>\s?/.test(line)) {
       const content = line.replace(/^\s*>\s?/, "");
       nodes.push(
-        <Box key={i} paddingLeft={1} borderStyle="single" borderColor={COLORS.textDim} borderLeft borderTop={false} borderRight={false} borderBottom={false}>
-          <Text color={COLORS.textDim} italic wrap="wrap">{renderInlineElements(content, `bq-${i}`)}</Text>
+        <Box key={i} paddingLeft={1} borderStyle="single" borderColor={theme.colors.textDim} borderLeft borderTop={false} borderRight={false} borderBottom={false}>
+          <Text color={theme.colors.textDim} italic wrap="wrap">{renderInlineElements(content, `bq-${i}`)}</Text>
         </Box>
       );
       continue;
@@ -463,7 +477,7 @@ function renderMarkdownLite(text: string): React.ReactNode[] {
     if (/^\s*([-*_]){3,}\s*$/.test(line)) {
       nodes.push(
         <Box key={i}>
-          <Text color={COLORS.textDim}>{"─".repeat(40)}</Text>
+          <Text color={theme.colors.textDim}>{"─".repeat(40)}</Text>
         </Box>
       );
       continue;
@@ -471,7 +485,7 @@ function renderMarkdownLite(text: string): React.ReactNode[] {
 
     // Regular paragraph
     nodes.push(
-      <Text key={i} color={COLORS.text} wrap="wrap">{renderInlineElements(line, `p-${i}`)}</Text>
+      <Text key={i} color={theme.colors.text} wrap="wrap">{renderInlineElements(line, `p-${i}`)}</Text>
     );
   }
 
@@ -492,6 +506,7 @@ function renderMarkdownLite(text: string): React.ReactNode[] {
 // ── Inline formatting: **bold**, `code`, [link](url), *italic* ──
 // Returns React elements for rich terminal rendering
 function renderInlineElements(text: string, keyPrefix: string): React.ReactNode {
+  const { theme } = useTheme();
   const tokens: React.ReactNode[] = [];
   let remaining = text;
   let keyIdx = 0;
@@ -535,7 +550,7 @@ function renderInlineElements(text: string, keyPrefix: string): React.ReactNode 
         tokens.push(<Text key={k} color="greenBright">{`\`${earliest.match[1]}\``}</Text>);
         break;
       case "link":
-        tokens.push(<Text key={k} color={COLORS.link} underline>{earliest.match[1]}</Text>);
+        tokens.push(<Text key={k} color={theme.colors.link} underline>{earliest.match[1]}</Text>);
         break;
     }
 

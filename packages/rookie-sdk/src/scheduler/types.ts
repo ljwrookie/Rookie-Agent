@@ -17,6 +17,7 @@ export interface ScheduledTask {
   nextRun?: number;
   runCount: number;
   loop?: boolean; // if true, re-schedules after completion
+  timeoutMs?: number;
 }
 
 export interface SchedulerStore {
@@ -35,5 +36,5 @@ export type SchedulerEvent =
   | { type: "task_started"; taskId: string; timestamp: number }
   | { type: "task_completed"; taskId: string; output: string; duration: number }
   | { type: "task_failed"; taskId: string; error: string }
-  | { type: "task_scheduled"; task: ScheduledTask }
-  | { type: "task_cancelled"; taskId: string };
+  | { type: "task_scheduled"; taskId: string; timestamp: number }
+  | { type: "task_cancelled"; taskId: string; timestamp: number };

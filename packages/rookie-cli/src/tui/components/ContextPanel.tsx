@@ -2,8 +2,8 @@
 // Sidebar showing: working directory, git info, recent/active files, tasks
 
 import { Box, Text } from "ink";
-import type { WorkspaceContext, LongTask } from "../types.js";
-import { COLORS } from "../types.js";
+import type { WorkspaceContext, LongTask, AgentStatus } from "../types.js";
+import { useTheme } from "../hooks/useTheme.js";
 
 interface ContextPanelProps {
   context: WorkspaceContext;
@@ -11,11 +11,89 @@ interface ContextPanelProps {
   model: string;
   sessionAge: string;
   maxHeight: number;
+  tab?: "context" | "files" | "agents" | "commands";
+  commands?: Array<{ name: string; description: string; usage?: string; category?: string }>;
+  agents?: AgentStatus[];
 }
 
-export function ContextPanel({ context, longTasks, model, sessionAge }: ContextPanelProps) {
+export function ContextPanel({ context, longTasks, model, sessionAge, tab = "context", commands = [], agents = [] }: ContextPanelProps) {
+  const { theme } = useTheme();
   const runningTasks = longTasks.filter(t => t.status === "running");
 
+  if (tab === "files") {
+    return (
+      <Box flexDirection="column" overflow="hidden">
+        <Section title={`ACTIVE (${context.activeFiles.length})`}>
+          {context.activeFiles.length === 0 ? (
+            <Text color={theme.colors.textDim}>-</Text>
+          ) : (
+            context.activeFiles.slice(-12).reverse().map(f => (
+              <Text key={f} color={theme.colors.text} wrap="truncate-end">· {shortPath(f)}</Text>
+            ))
+          )}
+        </Section>
+        <Section title={`RECENT (${context.recentFiles.length})`}>
+          {context.recentFiles.length === 0 ? (
+            <Text color={theme.colors.textDim}>-</Text>
+          ) : (
+            context.recentFiles.slice(-12).reverse().map(f => (
+              <Text key={f} color={theme.colors.textDim} wrap="truncate-end">· {shortPath(f)}</Text>
+            ))
+          )}
+        </Section>
+        <Text color={theme.colors.textDim}>Tip: Tab/Esc 退出输入后可用 g/b 导航</Text>
+      </Box>
+    );
+  }
+
+  if (tab === "commands") {
+    const items = commands.slice(0, 18);
+    return (
+      <Box flexDirection="column" overflow="hidden">
+        <Section title={`COMMANDS (${commands.length})`}>
+          {items.length === 0 ? (
+            <Text color={theme.colors.textDim}>-</Text>
+          ) : (
+            items.map((c) => (
+              <Box key={c.name} flexDirection="column" marginBottom={1}>
+                <Text color={theme.colors.text} wrap="truncate-end">/{c.name}</Text>
+                {c.description && <Text color={theme.colors.textDim} wrap="truncate-end">{c.description}</Text>}
+                {c.usage && <Text color={theme.colors.textDim} wrap="truncate-end">{c.usage}</Text>}
+              </Box>
+            ))
+          )}
+          {commands.length > items.length && (
+            <Text color={theme.colors.textDim}>+{commands.length - items.length} more…</Text>
+          )}
+        </Section>
+        <Text color={theme.colors.textDim}>Tip: 输入 “/” 查看建议，Tab 自动补全</Text>
+      </Box>
+    );
+  }
+
+  if (tab === "agents") {
+    return (
+      <Box flexDirection="column" overflow="hidden">
+        <Section title={`AGENTS (${agents.length})`}>
+          {agents.length === 0 ? (
+            <Text color={theme.colors.textDim}>-</Text>
+          ) : (
+            agents.slice(0, 16).map((a) => (
+              <Box key={a.id} justifyContent="space-between">
+                <Text color={theme.colors.text} wrap="truncate-end">{a.name}</Text>
+                <Text color={a.state === "running" ? theme.colors.warning : a.state === "error" ? theme.colors.error : a.state === "done" ? theme.colors.success : theme.colors.textDim}>
+                  {a.state}
+                </Text>
+              </Box>
+            ))
+          )}
+        </Section>
+        <Text color={theme.colors.textDim}>Tip: g a 打开 Agent 面板</Text>
+      </Box>
+    );
+  }
+
+  // Default: context
   return (
     <Box flexDirection="column" overflow="hidden">
       {/* Session info */}
@@ -31,16 +109,16 @@ export function ContextPanel({ context, longTasks, model, sessionAge }: ContextP
       {/* Active files */}
       <Section title={`FILES (${context.activeFiles.length})`}>
         {context.activeFiles.length === 0 ? (
-          <Text color={COLORS.textDim}>-</Text>
+          <Text color={theme.colors.textDim}>-</Text>
         ) : (
           context.activeFiles.slice(-8).map(f => (
-            <Text key={f} color={COLORS.text} wrap="truncate-end">
+            <Text key={f} color={theme.colors.text} wrap="truncate-end">
               · {shortPath(f)}
             </Text>
           ))
         )}
         {context.activeFiles.length > 8 && (
-          <Text color={COLORS.textDim}>+{context.activeFiles.length - 8} more</Text>
+          <Text color={theme.colors.textDim}>+{context.activeFiles.length - 8} more</Text>
         )}
       </Section>
 
@@ -48,7 +126,7 @@ export function ContextPanel({ context, longTasks, model, sessionAge }: ContextP
       <Section title="TASKS">
         <Row label="Done" value={`${context.taskCount.done}/${context.taskCount.total}`} />
         {context.taskCount.pending > 0 && (
-          <Row label="Pending" value={String(context.taskCount.pending)} valueColor={COLORS.warning} />
+          <Row label="Pending" value={String(context.taskCount.pending)} valueColor={theme.colors.warning} />
         )}
       </Section>
 
@@ -58,10 +136,10 @@ export function ContextPanel({ context, longTasks, model, sessionAge }: ContextP
           {runningTasks.map(t => (
             <Box key={t.id} flexDirection="column" marginBottom={1}>
               <Box justifyContent="space-between">
-                <Text color={COLORS.warning} wrap="truncate-end">
+                <Text color={theme.colors.warning} wrap="truncate-end">
                   ⟳ {t.name}
                 </Text>
-                <Text color={COLORS.textDim}>
+                <Text color={theme.colors.textDim}>
                   {fmtDuration(Date.now() - t.startedAt)}
                 </Text>
               </Box>
@@ -69,11 +147,11 @@ export function ContextPanel({ context, longTasks, model, sessionAge }: ContextP
               {t.progress !== undefined && (
                 <Box marginTop={0}>
                   <ProgressBar progress={t.progress} width={20} />
-                  <Text color={COLORS.textDim} dimColor> {Math.round(t.progress * 100)}%</Text>
+                  <Text color={theme.colors.textDim} dimColor> {Math.round(t.progress * 100)}%</Text>
                 </Box>
               )}
               {t.output && (
-                <Text color={COLORS.textDim} wrap="truncate-end">
+                <Text color={theme.colors.textDim} wrap="truncate-end">
                   {t.output.slice(-40)}
                 </Text>
               )}
@@ -82,31 +160,26 @@ export function ContextPanel({ context, longTasks, model, sessionAge }: ContextP
         </Section>
       )}
 
-      {/* Keyboard help (at bottom) */}
-      <Box flexDirection="column" marginTop={1}>
-        <Text color={COLORS.textDim} bold>KEYS</Text>
-        <Text color={COLORS.textDim}>j/k scroll  d diff  l logs</Text>
-        <Text color={COLORS.textDim}>a approve  r retry  / cmd</Text>
-        <Text color={COLORS.textDim}>1-5 modes  Esc back  ^C quit</Text>
-      </Box>
     </Box>
   );
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  const { theme } = useTheme();
   return (
     <Box flexDirection="column" marginBottom={1}>
-      <Text color={COLORS.textDim} bold>{title}</Text>
+      <Text color={theme.colors.textDim} bold>{title}</Text>
       {children}
     </Box>
   );
 }
 
 function Row({ label, value, valueColor }: { label: string; value: string; valueColor?: string }) {
+  const { theme } = useTheme();
   return (
     <Box justifyContent="space-between">
-      <Text color={COLORS.textDim}>{label}</Text>
-      <Text color={valueColor ?? COLORS.text} wrap="truncate-end">{value}</Text>
+      <Text color={theme.colors.textDim}>{label}</Text>
+      <Text color={valueColor ?? theme.colors.text} wrap="truncate-end">{value}</Text>
     </Box>
   );
 }
@@ -134,14 +207,15 @@ function fmtDuration(ms: number): string {
 
 // A2/A3: Progress bar component for tool execution with theming
 function ProgressBar({ progress, width = 20 }: { progress: number; width?: number }) {
+  const { theme } = useTheme();
   const filled = Math.max(0, Math.min(width, Math.round(progress * width)));
   const empty = width - filled;
   return (
     <Box>
-      <Text color={COLORS.progressBar}>
+      <Text color={theme.colors.progressBar}>
         {"█".repeat(filled)}
       </Text>
-      <Text color={COLORS.progressTrack}>
+      <Text color={theme.colors.progressTrack}>
         {"░".repeat(empty)}
       </Text>
     </Box>

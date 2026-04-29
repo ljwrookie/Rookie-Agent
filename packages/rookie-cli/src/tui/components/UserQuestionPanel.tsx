@@ -4,7 +4,7 @@
 
 import { Box, Text } from "ink";
 import type { UserQuestionRequest } from "../types.js";
-import { COLORS } from "../types.js";
+import { useTheme } from "../hooks/useTheme.js";
 
 interface UserQuestionPanelProps {
   questions: UserQuestionRequest[];
@@ -13,12 +13,13 @@ interface UserQuestionPanelProps {
 }
 
 export function UserQuestionPanel({ questions, selectedIdx, maxHeight }: UserQuestionPanelProps) {
+  const { theme } = useTheme();
   const pending = questions.filter((q) => q.status === "pending");
 
   if (pending.length === 0) {
     return (
       <Box flexDirection="column" paddingX={1}>
-        <Text color={COLORS.textDim}>No pending questions.</Text>
+        <Text color={theme.colors.textDim}>No pending questions.</Text>
       </Box>
     );
   }
@@ -26,10 +27,10 @@ export function UserQuestionPanel({ questions, selectedIdx, maxHeight }: UserQue
   return (
     <Box flexDirection="column" paddingX={1} overflow="hidden">
       <Box marginBottom={1}>
-        <Text bold color={COLORS.warning}>
+        <Text bold color={theme.colors.warning}>
           {pending.length} pending question{pending.length > 1 ? "s" : ""}
         </Text>
-        <Text color={COLORS.textDim}> — waiting for your response</Text>
+        <Text color={theme.colors.textDim}> — waiting for your response</Text>
       </Box>
 
       {pending
@@ -52,7 +53,8 @@ function QuestionCard({
   request: UserQuestionRequest;
   selected: boolean;
 }) {
-  const borderColor = selected ? COLORS.system : COLORS.border;
+  const { theme } = useTheme();
+  const borderColor = selected ? theme.colors.system : theme.colors.border;
 
   return (
     <Box
@@ -64,15 +66,15 @@ function QuestionCard({
     >
       {/* Header */}
       <Box justifyContent="space-between">
-        <Text bold color={COLORS.warning}>
+        <Text bold color={theme.colors.warning}>
           ? Question
         </Text>
-        <Text color={COLORS.textDim}>{fmtTime(request.timestamp)}</Text>
+        <Text color={theme.colors.textDim}>{fmtTime(request.timestamp)}</Text>
       </Box>
 
       {/* Question text */}
       <Box marginTop={1}>
-        <Text color={COLORS.text} wrap="wrap">
+        <Text color={theme.colors.text} wrap="wrap">
           {request.question}
         </Text>
       </Box>
@@ -80,13 +82,13 @@ function QuestionCard({
       {/* Options */}
       {request.options && request.options.length > 0 && (
         <Box marginTop={1} flexDirection="column">
-          <Text color={COLORS.textDim}>Options:</Text>
+          <Text color={theme.colors.textDim}>Options:</Text>
           {request.options.map((opt, i) => (
             <Box key={i}>
-              <Text color={COLORS.system} bold>
+              <Text color={theme.colors.system} bold>
                 {i + 1}.{" "}
               </Text>
-              <Text color={COLORS.text}>{opt}</Text>
+              <Text color={theme.colors.text}>{opt}</Text>
             </Box>
           ))}
         </Box>
@@ -95,8 +97,8 @@ function QuestionCard({
       {/* Default value hint */}
       {request.defaultValue && (
         <Box marginTop={1}>
-          <Text color={COLORS.textDim}>
-            Default: <Text color={COLORS.success}>{request.defaultValue}</Text>
+          <Text color={theme.colors.textDim}>
+            Default: <Text color={theme.colors.success}>{request.defaultValue}</Text>
           </Text>
         </Box>
       )}
@@ -104,7 +106,7 @@ function QuestionCard({
       {/* Status / hint */}
       {selected && (
         <Box marginTop={1}>
-          <Text color={COLORS.system}>
+          <Text color={theme.colors.system}>
             Press <Text bold>Tab</Text> to focus input and type your answer, then{" "}
             <Text bold>Enter</Text> to submit
           </Text>

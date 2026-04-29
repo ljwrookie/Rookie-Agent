@@ -3,7 +3,7 @@
 
 import { Box, Text } from "ink";
 import type { PlanState } from "../types.js";
-import { COLORS } from "../types.js";
+import { useTheme } from "../hooks/useTheme.js";
 
 interface PlanPanelProps {
   plan: PlanState | null;
@@ -11,10 +11,11 @@ interface PlanPanelProps {
 }
 
 export function PlanPanel({ plan, maxHeight }: PlanPanelProps) {
+  const { theme } = useTheme();
   if (!plan) {
     return (
       <Box flexDirection="column" paddingX={1}>
-        <Text color={COLORS.textDim}>No active plan.</Text>
+        <Text color={theme.colors.textDim}>No active plan.</Text>
       </Box>
     );
   }
@@ -27,20 +28,20 @@ export function PlanPanel({ plan, maxHeight }: PlanPanelProps) {
     <Box flexDirection="column" paddingX={1} overflow="hidden">
       {/* Title + progress */}
       <Box justifyContent="space-between">
-        <Text bold color={COLORS.text}>
+        <Text bold color={theme.colors.text}>
           {plan.title}
         </Text>
-        <Text color={COLORS.textDim}>
+        <Text color={theme.colors.textDim}>
           {doneCount}/{plan.steps.length} ({plan.completionPct}%)
         </Text>
       </Box>
 
       {/* Progress bar */}
       <Box>
-        <Text color={COLORS.textDim}>[</Text>
-        <Text color={COLORS.success}>{"█".repeat(filled)}</Text>
-        <Text color={COLORS.textDim}>{"░".repeat(Math.max(0, barWidth - filled))}</Text>
-        <Text color={COLORS.textDim}>]</Text>
+        <Text color={theme.colors.textDim}>[</Text>
+        <Text color={theme.colors.success}>{"█".repeat(filled)}</Text>
+        <Text color={theme.colors.textDim}>{"░".repeat(Math.max(0, barWidth - filled))}</Text>
+        <Text color={theme.colors.textDim}>]</Text>
       </Box>
 
       {/* Steps */}
@@ -49,7 +50,7 @@ export function PlanPanel({ plan, maxHeight }: PlanPanelProps) {
           <PlanStepRow key={step.id} step={step} />
         ))}
         {plan.steps.length > maxHeight - 4 && (
-          <Text color={COLORS.textDim}>
+          <Text color={theme.colors.textDim}>
             ... {plan.steps.length - (maxHeight - 4)} more steps
           </Text>
         )}
@@ -59,6 +60,7 @@ export function PlanPanel({ plan, maxHeight }: PlanPanelProps) {
 }
 
 function PlanStepRow({ step }: { step: PlanState["steps"][0] }) {
+  const { theme } = useTheme();
   const icons: Record<string, string> = {
     pending: "○",
     active: "◉",
@@ -68,15 +70,15 @@ function PlanStepRow({ step }: { step: PlanState["steps"][0] }) {
   };
 
   const colors: Record<string, string> = {
-    pending: COLORS.textDim,
-    active: COLORS.system,
-    done: COLORS.success,
-    error: COLORS.error,
-    skipped: COLORS.textDim,
+    pending: theme.colors.textDim,
+    active: theme.colors.system,
+    done: theme.colors.success,
+    error: theme.colors.error,
+    skipped: theme.colors.textDim,
   };
 
   const icon = icons[step.status] ?? "·";
-  const color = colors[step.status] ?? COLORS.textDim;
+  const color = colors[step.status] ?? theme.colors.textDim;
   const duration = step.durationMs ? ` ${fmtDuration(step.durationMs)}` : "";
 
   return (
@@ -86,7 +88,7 @@ function PlanStepRow({ step }: { step: PlanState["steps"][0] }) {
           {icon} {step.title}
         </Text>
       </Box>
-      <Text color={COLORS.textDim}>{duration}</Text>
+      <Text color={theme.colors.textDim}>{duration}</Text>
     </Box>
   );
 }

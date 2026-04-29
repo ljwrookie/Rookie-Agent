@@ -497,7 +497,8 @@ export class AgentOrchestrator {
       // For now, we use dynamic imports for each tool
       for (const toolName of subtask.allowedTools) {
         try {
-          const toolModule = await import(`../tools/builtin/${toolName}.js`);
+          const toolModulePath = `../tools/builtin/${toolName}.js`;
+          const toolModule = await import(toolModulePath);
           const tool = toolModule.default || toolModule[toolName];
           if (tool && typeof tool === "object" && "name" in tool) {
             restrictedTools.register(tool as any);

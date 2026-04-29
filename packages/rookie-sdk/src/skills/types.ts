@@ -95,3 +95,12 @@ export interface SkillImprovement {
   after: string;
   reason: string;
 }
+
+export interface SkillEntry {
+  id: string;
+  name: string;
+  description: string;
+  triggers: Trigger[];
+  tools: string[];
+  metadata?: Record<string, unknown>;
+}

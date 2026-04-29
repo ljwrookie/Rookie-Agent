@@ -310,6 +310,111 @@ export class MemoryStore {
     `).all(type, limit);
   }
 
+  // ── Search with Summary (P4-T4) ────────────────────────────
+
+  /**
+   * Search curated memories with optional LLM summary.
+   * P4-T4: Enhanced search with summary generation.
+   */
+  async searchWithSummary(
+    query: string,
+    options: {
+      limit?: number;
+      minConfidence?: number;
+      types?: CuratedMemory["type"][];
+    } = {}
+  ): Promise<{
+    memories: CuratedMemory[];
+    totalConfidence: number;
+    averageConfidence: number;
+  }> {
+    await this.ensureInit();
+
+    const { limit = 10, minConfidence = 0.5, types } = options;
+
+    let memories: CuratedMemory[];
+
+    if (!this.db) {
+      memories = this.curatedInMemory
+        .filter((m) => {
+          if (m.confidence < minConfidence) return false;
+          if (types && !types.includes(m.type)) return false;
+          return m.content.includes(query);
+        })
+        .slice(0, limit);
+    } else {
+      let sql = `
+        SELECT cm.*
+        FROM curated_fts f
+        JOIN curated_memory cm ON cm.rowid = f.rowid
+        WHERE curated_fts MATCH ? AND cm.confidence >= ?
+      `;
+      const params: (string | number)[] = [query, minConfidence];
+
+      if (types && types.length > 0) {
+        const placeholders = types.map(() => "?").join(",");
+        sql += ` AND cm.type IN (${placeholders})`;
+        params.push(...types);
+      }
+
+      sql += ` ORDER BY cm.confidence DESC, rank LIMIT ?`;
+      params.push(limit);
+
+      const rows = this.db.prepare(sql).all(...params);
+      memories = rows.map((r: any) => ({
+        id: r.id,
+        type: r.type,
+        content: r.content,
+        confidence: r.confidence,
+        source: r.source,
+        createdAt: r.created_at,
+        lastUsedAt: r.last_used_at,
+        useCount: r.use_count,
+      }));
+    }
+
+    const totalConfidence = memories.reduce((sum, m) => sum + m.confidence, 0);
+    const averageConfidence = memories.length > 0 ? totalConfidence / memories.length : 0;
+
+    return {
+      memories,
+      totalConfidence,
+      averageConfidence,
+    };
+  }
+
+  /**
+   * Get recent memories for a session.
+   */
+  async getRecentForSession(sessionId: string, limit: number = 50): Promise<CuratedMemory[]> {
+    await this.ensureInit();
+
+    if (!this.db) {
+      return this.curatedInMemory
+        .filter((m) => m.source.includes(sessionId))
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .slice(0, limit);
+    }
+
+    const rows = this.db.prepare(`
+      SELECT * FROM curated_memory 
+      WHERE source LIKE ? 
+      ORDER BY created_at DESC 
+      LIMIT ?
+    `).all(`%${sessionId}%`, limit);
+
+    return rows.map((r: any) => ({
+      id: r.id,
+      type: r.type,
+      content: r.content,
+      confidence: r.confidence,
+      source: r.source,
+      createdAt: r.created_at,
+      lastUsedAt: r.last_used_at,
+      useCount: r.use_count,
+    }));
+  }
+
   // ── Utility ────────────────────────────────────────────────
 
   async close(): Promise<void> {

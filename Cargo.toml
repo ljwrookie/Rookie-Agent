@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/rookie-core", "crates/rookie-cli"]
+members = ["crates/rookie-core", "crates/rookie-cli", "crates/rookie-napi"]
 resolver = "2"
 
 [workspace.dependencies]
@@ -19,3 +19,17 @@ tokio = { version = "1", features = ["full"] }
 anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+# P5: Search & Diff engines
+grep-regex = "0.1"
+grep-searcher = "0.1"
+globset = "0.4"
+rayon = "1.10"
+similar = "2.6"
+napi = { version = "3.0.0-alpha", default-features = false, features = ["napi9", "serde-json", "async"] }
+napi-derive = "3.0.0-alpha"
+napi-build = "2"
+tiktoken-rs = "0.6"
+# P7: Scheduler & Blackboard
+cron = "0.15"
+async-trait = "0.1"
+uuid = { version = "1", features = ["v4"] }

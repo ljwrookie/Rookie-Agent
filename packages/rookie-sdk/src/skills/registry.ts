@@ -2,20 +2,41 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import { Skill, SkillManifest, CompletedTask } from "./types.js";
 import { SkillLoader } from "./loader.js";
+import { SemanticSkillMatcher, SemanticMatchResult } from "./matcher.js";
+
+export interface SkillRegistryOptions {
+  storageDir?: string;
+  enableSemanticMatching?: boolean;
+  semanticMatcherConfig?: {
+    dimension?: number;
+    seed?: number;
+  };
+}
 
 export class SkillRegistry {
   private skills = new Map<string, Skill>();
   private storageDir: string;
   private loader: SkillLoader;
   private watchAbort: AbortController | null = null;
+  private semanticMatcher: SemanticSkillMatcher | null = null;
+  private enableSemanticMatching: boolean;
 
-  constructor(storageDir?: string) {
-    this.storageDir = storageDir || path.join(process.cwd(), ".rookie", "skills");
+  constructor(options: SkillRegistryOptions = {}) {
+    this.storageDir = options.storageDir || path.join(process.cwd(), ".rookie", "skills");
     this.loader = new SkillLoader();
+    this.enableSemanticMatching = options.enableSemanticMatching ?? true;
+    
+    if (this.enableSemanticMatching) {
+      this.semanticMatcher = new SemanticSkillMatcher({
+        dimension: options.semanticMatcherConfig?.dimension ?? 128,
+        seed: options.semanticMatcherConfig?.seed ?? 42,
+      });
+    }
   }
 
   register(skill: Skill): void {
     this.skills.set(skill.name, skill);
+    this.semanticMatcher?.registerSkill(skill);
   }
 
   get(name: string): Skill | undefined {
@@ -27,15 +48,52 @@ export class SkillRegistry {
   }
 
   remove(name: string): boolean {
+    this.semanticMatcher?.removeSkill(name);
     return this.skills.delete(name);
   }
 
   /**
-   * Find skills whose triggers match the given user input.
+   * Find skills using semantic matching (P8).
+   * Returns skills sorted by semantic similarity to the query.
    */
-  findByTrigger(userInput: string): Skill[] {
+  findBySemanticMatch(query: string, topK?: number): SemanticMatchResult[] {
+    if (!this.semanticMatcher || this.semanticMatcher.isEmpty) {
+      return [];
+    }
+    return this.semanticMatcher.findMatches(query, topK ?? 5);
+  }
+
+  /**
+   * Find the best matching skill using semantic matching.
+   */
+  findBestSemanticMatch(query: string): SemanticMatchResult | null {
+    if (!this.semanticMatcher || this.semanticMatcher.isEmpty) {
+      return null;
+    }
+    return this.semanticMatcher.findBestMatch(query);
+  }
+
+  /**
+   * Check if semantic matching is available (native Rust module loaded).
+   */
+  get isSemanticMatchingAvailable(): boolean {
+    return this.semanticMatcher?.isNativeAvailable ?? false;
+  }
+
+  /**
+   * Calculate semantic similarity between two texts.
+   */
+  calculateSimilarity(text1: string, text2: string): number {
+    return this.semanticMatcher?.calculateSimilarity(text1, text2) ?? 0;
+  }
+
+  /**
+   * Find skills whose triggers match the given user input.
+   * Falls back to semantic matching if no trigger matches.
+   */
+  findByTrigger(userInput: string, useSemanticFallback: boolean = true): Skill[] {
     const input = userInput.toLowerCase().trim();
-    return this.list().filter((skill) =>
+    const triggerMatches = this.list().filter((skill) =>
       skill.triggers.some((t) => {
         switch (t.type) {
           case "command":
@@ -49,6 +107,17 @@ export class SkillRegistry {
         }
       })
     );
+
+    // If no trigger matches and semantic fallback is enabled, use semantic matching
+    if (triggerMatches.length === 0 && useSemanticFallback && this.semanticMatcher) {
+      const semanticMatches = this.semanticMatcher.findMatches(userInput, 3);
+      // Only return semantic matches with good confidence (> 0.5)
+      return semanticMatches
+        .filter(m => m.score > 0.5)
+        .map(m => m.skill);
+    }
+
+    return triggerMatches;
   }
 
   /**

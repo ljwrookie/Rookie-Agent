@@ -1,0 +1,197 @@
+name: NAPI-RS Build
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'crates/rookie-napi/**'
+      - 'crates/rookie-core/**'
+      - '.github/workflows/napi.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'crates/rookie-napi/**'
+      - 'crates/rookie-core/**'
+
+jobs:
+  # Build matrix for different platforms
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux x64
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            binary: rookie-napi.linux-x64.node
+            platform: linux
+            arch: x64
+          
+          # Linux ARM64
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            binary: rookie-napi.linux-arm64.node
+            platform: linux
+            arch: arm64
+            cross: true
+          
+          # macOS ARM64 (Apple Silicon)
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            binary: rookie-napi.darwin-arm64.node
+            platform: darwin
+            arch: arm64
+          
+          # macOS x64 (Intel)
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            binary: rookie-napi.darwin-x64.node
+            platform: darwin
+            arch: x64
+          
+          # Windows x64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary: rookie-napi.win32-x64.node
+            platform: win32
+            arch: x64
+
+    runs-on: ${{ matrix.os }}
+    name: Build ${{ matrix.target }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Setup cross-compilation
+        if: matrix.cross
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ${{ matrix.target }}
+
+      - name: Install dependencies (Ubuntu)
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev pkg-config
+
+      - name: Build NAPI addon
+        run: |
+          cd crates/rookie-napi
+          if [ "${{ matrix.cross }}" = "true" ]; then
+            cargo build --release --target ${{ matrix.target }}
+          else
+            cargo build --release --target ${{ matrix.target }}
+          fi
+        shell: bash
+
+      - name: Rename binary (Unix)
+        if: matrix.platform != 'win32'
+        run: |
+          cp target/${{ matrix.target }}/release/librookie_napi.so crates/rookie-napi/${{ matrix.binary }} 2>/dev/null || \
+          cp target/${{ matrix.target }}/release/librookie_napi.dylib crates/rookie-napi/${{ matrix.binary }} 2>/dev/null || \
+          cp target/${{ matrix.target }}/release/rookie_napi.dll crates/rookie-napi/${{ matrix.binary }} 2>/dev/null || \
+          echo "Looking for binary..."
+          find target/${{ matrix.target }}/release -name "*rookie_napi*" -type f
+        shell: bash
+
+      - name: Rename binary (Windows)
+        if: matrix.platform == 'win32'
+        run: |
+          copy target\${{ matrix.target }}\release\rookie_napi.dll crates\rookie-napi\${{ matrix.binary }}
+        shell: cmd
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.binary }}
+          path: crates/rookie-napi/${{ matrix.binary }}
+          if-no-files-found: warn
+
+  # Test the NAPI addon
+  test:
+    needs: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            binary: rookie-napi.linux-x64.node
+          - os: macos-latest
+            binary: rookie-napi.darwin-arm64.node
+          - os: windows-latest
+            binary: rookie-napi.win32-x64.node
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Download native addon
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.binary }}
+          path: packages/rookie-sdk/native/
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Run NAPI tests
+        run: |
+          cd packages/rookie-sdk
+          pnpm test -- --grep "NAPI"
+        env:
+          ROOKIE_NATIVE_PATH: ./native/${{ matrix.binary }}
+
+  # Publish native binaries to npm
+  publish:
+    needs: [build, test]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Create native package
+        run: |
+          mkdir -p packages/rookie-sdk/native
+          cp artifacts/*/* packages/rookie-sdk/native/
+          ls -la packages/rookie-sdk/native/
+
+      - name: Publish to npm (optional)
+        if: false  # Enable when ready to publish
+        run: |
+          cd packages/rookie-sdk
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -190,10 +190,12 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({
 
         {/* Mailbox */}
         <Box flexDirection="column" width="40%" borderStyle="single" padding={1}>
-          <Text bold color="cyan" marginBottom={1}>
-            📬 Mailbox
-            {selectedAgentId && ` (${agents.find((a) => a.id === selectedAgentId)?.name || selectedAgentId})`}
-          </Text>
+          <Box marginBottom={1}>
+            <Text bold color="cyan">
+              📬 Mailbox
+              {selectedAgentId && ` (${agents.find((a) => a.id === selectedAgentId)?.name || selectedAgentId})`}
+            </Text>
+          </Box>
 
           <Box flexDirection="column" flexGrow={1} overflow="hidden">
             {relevantMessages.length === 0 ? (

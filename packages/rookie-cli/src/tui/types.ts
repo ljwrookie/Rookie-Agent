@@ -6,7 +6,7 @@ import type { ToolCall } from "@rookie/agent-sdk";
 
 // ── Modes ────────────────────────────────────────────────────────
 
-export type TuiMode = "chat" | "plan" | "diff" | "logs" | "review" | "approve" | "agents";
+export type TuiMode = "chat" | "plan" | "diff" | "logs" | "review" | "approve" | "agents" | "model" | "checkpoint" | "skill" | "memory";
 
 // ── Event Stream Items ──────────────────────────────────────────
 
@@ -147,6 +147,8 @@ export interface StatusInfo {
   pendingApprovals: number;
   pendingQuestions?: number;
   streamStatus?: "idle" | "streaming" | "stalled" | "recovering";
+  /** P3.2: Context usage ratio (0-1) for gauge display */
+  contextRatio?: number;
 }
 
 // ── D8: Multi-Agent State ───────────────────────────────────────
@@ -214,36 +216,8 @@ export const KEY_BINDINGS: KeyBinding[] = [
   { key: "d", description: "View diff", mode: "chat" },
   { key: "l", description: "Expand logs", mode: "chat" },
   { key: "r", description: "Retry", mode: "chat" },
-  { key: "a", description: "Approve", mode: "approve" },
+  { key: "o", description: "Approve (once)", mode: "approve" },
 ];
-
-// ── Color Semantics ─────────────────────────────────────────────
-// A3: Theme-aware colors (defaults to dark theme)
-
-export const COLORS = {
-  // Neutral
-  text: "white",
-  textDim: "gray",
-  border: "gray",
-  background: "black",
-  // System
-  system: "cyan",
-  link: "blue",
-  // Feedback
-  success: "green",
-  warning: "yellow",
-  error: "red",
-  fatal: "redBright",
-  // Accents
-  user: "green",
-  assistant: "cyan",
-  toolName: "magenta",
-  modeBadge: "blueBright",
-  // A3: Theme-specific
-  spinner: "yellow",
-  progressBar: "cyan",
-  progressTrack: "gray",
-} as const;
 
 // A3: Re-export theme types for convenience
 export type { ThemeName, ThemeColors, Theme } from "./theme.js";

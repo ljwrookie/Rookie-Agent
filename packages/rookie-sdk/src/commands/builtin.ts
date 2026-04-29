@@ -13,6 +13,8 @@
  * The handler emits a friendly systemMessage explaining the CLI form.
  */
 
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import { CommandRegistry } from "./registry.js";
 import type { SlashCommand } from "./types.js";
 import { intervalToString, type ScheduleInterval } from "../scheduler/parser.js";
@@ -118,7 +120,7 @@ export const DEFAULT_COMMANDS: SlashCommand[] = [
     name: "verify",
     description: "Run features.json verifyCommands",
     usage: "/verify [--feature <id>] [--bail]",
-    paramsHint: "run `rookie verify` outside the TUI for streaming output",
+    paramsHint: "verify current features against features.json",
     category: "workflow",
     handler: async (ctx) => {
       const extra = ctx.args.join(" ").trim();
@@ -259,7 +261,7 @@ export const DEFAULT_COMMANDS: SlashCommand[] = [
     category: "workflow",
     handler: async () => ({
       prompt:
-        "List the current tasks from `.rookie/progress.md` and suggest the next action.",
+        "List the current tasks from `.rookie/todos.json` and suggest the next action.",
     }),
   }),
 
@@ -270,40 +272,159 @@ export const DEFAULT_COMMANDS: SlashCommand[] = [
     usage: "/config [--layer global|project|local]",
     paramsHint: "non-interactive form: `rookie config`",
     category: "system",
-    handler: async () => ({
-      systemMessage:
-        "Run `rookie config` in another shell to see the merged settings (supports --format json / --layer).",
-    }),
+    handler: async (ctx) => {
+      const { ConfigManager, loadSettings } = await import("../index.js");
+      const layer = ctx.args.find((a) => ["global", "project", "local"].includes(a));
+      const projectRoot = (ctx.meta?.projectRoot as string) ?? process.cwd();
+
+      try {
+        if (layer === "global") {
+          const cm = new ConfigManager();
+          const cfg = await cm.load();
+          return { systemMessage: `Global config:\n${JSON.stringify(cfg, null, 2)}` };
+        }
+        if (layer === "local") {
+          const localPath = path.join(projectRoot, ".rookie", "settings.local.json");
+          try {
+            const raw = await fs.readFile(localPath, "utf-8");
+            const parsed = JSON.parse(raw);
+            return { systemMessage: `Local config:\n${JSON.stringify(parsed, null, 2)}` };
+          } catch {
+            return { systemMessage: "No local settings found at .rookie/settings.local.json" };
+          }
+        }
+        // Default: merged view
+        const { merged } = await loadSettings({ projectRoot });
+        return { systemMessage: `Merged settings (local > project > global):\n${JSON.stringify(merged, null, 2)}` };
+      } catch (e) {
+        const err = e instanceof Error ? e.message : String(e);
+        return { systemMessage: `[ERROR] Failed to load config: ${err}` };
+      }
+    },
   }),
   mk({
     name: "hook",
     description: "Manage hooks (list/add/test/remove)",
-    usage: "/hook",
-    paramsHint: "run `rookie hook --help` outside the TUI",
+    usage: "/hook [list|test <event>|remove <id>]",
+    paramsHint: "list: show all hooks. test <event>: fire a test event. remove <id>: remove hook by id.",
     category: "system",
-    handler: async () => ({
-      systemMessage:
-        "Use `rookie hook list|add|test|remove` from the CLI. The TUI will surface hook events in the log view.",
-    }),
+    handler: async (ctx) => {
+      const sub = ctx.args[0] ?? "list";
+      const { HookRegistry } = await import("../index.js");
+      // Hooks are stored in settings; load from project root
+      const projectRoot = (ctx.meta?.projectRoot as string) ?? process.cwd();
+      const { loadSettings } = await import("../index.js");
+
+      try {
+        const { merged } = await loadSettings({ projectRoot });
+        const hooks = (merged.hooks ?? {}) as Record<string, unknown[]>;
+
+        if (sub === "list") {
+          const entries = Object.entries(hooks);
+          if (entries.length === 0) {
+            return { systemMessage: "No hooks registered. Add hooks via .rookie/settings.local.json" };
+          }
+          const lines = entries.map(([event, configs]) => {
+            const count = Array.isArray(configs) ? configs.length : 0;
+            return `${event}: ${count} hook(s)`;
+          });
+          return { systemMessage: `Registered hooks:\n${lines.join("\n")}` };
+        }
+
+        if (sub === "test" && ctx.args[1]) {
+          const event = ctx.args[1];
+          const registry = new HookRegistry();
+          registry.loadFromSettings(merged);
+          const results = await registry.fire(event as any, { projectRoot, sessionId: "test" });
+          const successCount = results.filter((r) => r.success).length;
+          return { systemMessage: `Fired ${event}: ${results.length} result(s), ${successCount} succeeded` };
+        }
+
+        return { systemMessage: "Usage: /hook [list|test <event>|remove <id>]" };
+      } catch (e) {
+        const err = e instanceof Error ? e.message : String(e);
+        return { systemMessage: `[ERROR] Hook command failed: ${err}` };
+      }
+    },
   }),
   mk({
     name: "doctor",
     description: "Check system configuration and dependencies",
     usage: "/doctor",
     category: "system",
-    handler: async () => ({
-      systemMessage: "Run `rookie doctor` outside the TUI to inspect binaries, API keys, and transports.",
-    }),
+    handler: async () => {
+      const checks: string[] = [];
+      // API keys
+      const keys = ["OPENAI_API_KEY", "ARK_API_KEY", "ANTHROPIC_API_KEY"];
+      for (const k of keys) {
+        checks.push(`${process.env[k] ? "✓" : "✗"} ${k}`);
+      }
+      // Node version
+      checks.push(`Node: ${process.version}`);
+      // Platform
+      checks.push(`Platform: ${process.platform} (${process.arch})`);
+      // Core binary
+      try {
+        const { resolveCoreBinary } = await import("../index.js");
+        const bin = resolveCoreBinary();
+        checks.push(`✓ Core binary: ${bin}`);
+      } catch {
+        checks.push("✗ Core binary not found");
+      }
+      // Git
+      try {
+        const { execSync } = await import("child_process");
+        const git = execSync("git --version", { encoding: "utf-8", timeout: 3000 }).trim();
+        checks.push(`✓ ${git}`);
+      } catch {
+        checks.push("✗ git not found");
+      }
+      return { systemMessage: `System check:\n${checks.join("\n")}` };
+    },
   }),
   mk({
     name: "skill",
     description: "List available skills (SKILL.md)",
-    usage: "/skill",
+    usage: "/skill [list|search <query>]",
     category: "system",
-    handler: async () => ({
-      systemMessage:
-        "Skill management: place SKILL.md files under `.rookie/skills/` (project) or `~/.rookie/skills/` (global).",
-    }),
+    handler: async (ctx) => {
+      const { SkillRegistry } = await import("../index.js");
+      const projectRoot = (ctx.meta?.projectRoot as string) ?? process.cwd();
+      const sub = ctx.args[0] ?? "list";
+
+      try {
+        const skills = new SkillRegistry({ storageDir: path.join(projectRoot, ".rookie", "skills") });
+        await skills.loadAll(projectRoot);
+        const all = skills.list();
+
+        if (sub === "search" && ctx.args[1]) {
+          const query = ctx.args.slice(1).join(" ");
+          const matches = skills.findBySemanticMatch(query, 5);
+          if (matches.length === 0) {
+            return { systemMessage: `No skills match "${query}"` };
+          }
+          const lines = matches.map((m) => `${m.skill.name} (score: ${m.score.toFixed(2)}) — ${m.skill.description}`);
+          return { systemMessage: `Skills matching "${query}":\n${lines.join("\n")}` };
+        }
+
+        if (all.length === 0) {
+          return { systemMessage: "No skills found. Add SKILL.md files to .rookie/skills/ (project) or ~/.rookie/skills/ (global)." };
+        }
+        const lines = all.map((s) => `• ${s.name} — ${s.description}`);
+        return { systemMessage: `Available skills (${all.length}):\n${lines.join("\n")}` };
+      } catch (e) {
+        const err = e instanceof Error ? e.message : String(e);
+        return { systemMessage: `[ERROR] Skill command failed: ${err}` };
+      }
+    },
+  }),
+  // P3.1: Model picker command
+  mk({
+    name: "model",
+    description: "Open model picker overlay",
+    usage: "/model",
+    category: "system",
+    handler: async () => ({ mode: "model" }),
   }),
   // B4: Undo command for file history
   mk({
@@ -339,6 +460,14 @@ export const DEFAULT_COMMANDS: SlashCommand[] = [
         return { systemMessage: `[ERROR] Snapshot not found or restore failed: ${snapshotId}` };
       }
     },
+  }),
+  // P3.3: Checkpoint overlay command
+  mk({
+    name: "checkpoint",
+    description: "Open checkpoint history overlay",
+    usage: "/checkpoint",
+    category: "navigation",
+    handler: async () => ({ mode: "checkpoint" }),
   }),
   // A3: Theme switching command
   mk({

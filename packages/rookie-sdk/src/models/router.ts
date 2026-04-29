@@ -1,4 +1,5 @@
 import { ModelProvider } from "./types.js";
+import { HealthRegistry } from "./health.js";
 
 export type TaskType = "code" | "chat" | "embed" | "fast" | "reasoning" | "review" | "architect";
 
@@ -131,21 +132,53 @@ export class FallbackStrategy implements RoutingStrategy {
 }
 
 /**
+ * Health-aware routing strategy
+ */
+export class HealthAwareStrategy implements RoutingStrategy {
+  private healthRegistry: HealthRegistry;
+  private inner: RoutingStrategy;
+
+  constructor(healthRegistry: HealthRegistry, inner?: RoutingStrategy) {
+    this.healthRegistry = healthRegistry;
+    this.inner = inner || new DefaultStrategy();
+  }
+
+  route(task: TaskType, providers: Map<string, ModelProvider>): ModelProvider {
+    // Filter to healthy providers only
+    const healthyProviders = new Map<string, ModelProvider>();
+    for (const [name, provider] of providers) {
+      const health = this.healthRegistry.get(name);
+      if (health.isHealthy()) {
+        healthyProviders.set(name, provider);
+      }
+    }
+
+    // If no healthy providers, try all (circuit breakers may have recovered)
+    const candidates = healthyProviders.size > 0 ? healthyProviders : providers;
+
+    return this.inner.route(task, candidates);
+  }
+}
+
+/**
  * ModelRouter: the main entry point for model selection.
  *
  * Features:
  * - Multiple registered providers (OpenAI, Anthropic, OpenRouter, etc.)
  * - Pluggable routing strategies
  * - Default provider selection
- * - Provider health tracking (future)
+ * - Provider health tracking with circuit breaker
+ * - Automatic fallback with retry
  */
 export class ModelRouter {
   private providers = new Map<string, ModelProvider>();
   private defaultProvider?: string;
   private strategy: RoutingStrategy;
+  private healthRegistry: HealthRegistry;
 
-  constructor(strategy?: RoutingStrategy) {
-    this.strategy = strategy || new DefaultStrategy();
+  constructor(strategy?: RoutingStrategy, healthRegistry?: HealthRegistry) {
+    this.healthRegistry = healthRegistry || new HealthRegistry();
+    this.strategy = new HealthAwareStrategy(this.healthRegistry, strategy || new DefaultStrategy());
   }
 
   register(name: string, provider: ModelProvider): void {
@@ -160,6 +193,7 @@ export class ModelRouter {
     if (this.defaultProvider === name) {
       this.defaultProvider = this.providers.keys().next().value;
     }
+    this.healthRegistry.reset(name);
     return removed;
   }
 
@@ -194,7 +228,21 @@ export class ModelRouter {
   }
 
   setStrategy(strategy: RoutingStrategy): void {
-    this.strategy = strategy;
+    this.strategy = new HealthAwareStrategy(this.healthRegistry, strategy);
+  }
+
+  /**
+   * Get health registry for tracking provider health
+   */
+  getHealthRegistry(): HealthRegistry {
+    return this.healthRegistry;
+  }
+
+  /**
+   * Get health metrics for all providers
+   */
+  getHealthMetrics(): Map<string, import("./health.js").HealthMetrics> {
+    return this.healthRegistry.getAllMetrics();
   }
 
   /**
@@ -206,5 +254,56 @@ export class ModelRouter {
     const alternates = Array.from(this.providers.values())
       .filter((p) => p !== primary);
     return [primary, ...alternates];
+  }
+
+  /**
+   * Route with automatic retry and intelligent fallback.
+   * Returns providers in order of preference for retry.
+   */
+  routeWithAutoFallback(task: TaskType, maxRetries = 3): {
+    primary: ModelProvider;
+    fallbacks: ModelProvider[];
+    retryStrategy: "exponential-backoff" | "circuit-breaker";
+  } {
+    const allProviders = this.routeWithFallback(task);
+    const [primary, ...fallbacks] = allProviders;
+
+    // Determine retry strategy based on health
+    const primaryHealth = this.healthRegistry.get(this.getProviderName(primary));
+    const metrics = primaryHealth.getMetrics();
+
+    const retryStrategy = metrics.circuitState === "open"
+      ? "circuit-breaker"
+      : "exponential-backoff";
+
+    return {
+      primary,
+      fallbacks: fallbacks.slice(0, maxRetries - 1),
+      retryStrategy,
+    };
+  }
+
+  /**
+   * Record a successful request for a provider
+   */
+  recordSuccess(providerName: string, latency: number): void {
+    this.healthRegistry.get(providerName).recordSuccess(latency);
+  }
+
+  /**
+   * Record a failed request for a provider
+   */
+  recordFailure(providerName: string, error: string, latency: number): void {
+    this.healthRegistry.get(providerName).recordFailure(error, latency);
+  }
+
+  /**
+   * Get provider name from instance
+   */
+  private getProviderName(provider: ModelProvider): string {
+    for (const [name, p] of this.providers) {
+      if (p === provider) return name;
+    }
+    return provider.name;
   }
 }

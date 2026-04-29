@@ -17,6 +17,7 @@ import { TokenTracker } from "../tracking.js";
 import { Compactor } from "./compactor.js";
 import { SkillLearner } from "../skills/learner.js";
 import { CompletedTask } from "../skills/types.js";
+import { MemoryNudgeEngine } from "../memory/nudge.js";
 
 const MAX_ITERATIONS = 15;
 
@@ -56,6 +57,8 @@ async function maybeCompactInPlace(
 export interface RunReActOptions {
   tokenTracker?: TokenTracker;
   skillLearner?: SkillLearner;
+  /** P4-T5: Memory nudge engine for automatic pattern extraction */
+  nudgeEngine?: MemoryNudgeEngine;
   onSkillProposed?: (candidate: {
     name: string;
     description: string;
@@ -137,6 +140,8 @@ async function* runFunctionCallingStep(
   options?: RunReActOptions
 ): AsyncGenerator<AgentEvent> {
   const toolDefs = buildToolDefinitions(agent, context);
+  const nudgeEngine = options?.nudgeEngine;
+  const sessionId = context.sessionId || `session_${Date.now()}`;
 
   const params: ChatWithToolsParams = {
     messages,
@@ -241,6 +246,20 @@ async function* runFunctionCallingStep(
 
         steps.push({ thought: textContent, action: toolCall, observation: result.output });
         messages.push({ role: "tool", content: result.output, tool_call_id: tc.id });
+
+        // P4-T5: Process for memory nudge
+        if (nudgeEngine) {
+          const nudgeResult = await nudgeEngine.processEvent(
+            { type: "tool_result", result, duration },
+            sessionId
+          );
+          if (nudgeResult?.hasMemories) {
+            yield {
+              type: "system_message",
+              content: `💡 Extracted ${nudgeResult.memories.length} pattern(s) from conversation`,
+            };
+          }
+        }
       } catch (e) {
         const duration = Date.now() - startTime;
 

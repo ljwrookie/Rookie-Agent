@@ -19,9 +19,10 @@ export const PERMISSION_SOURCE_PRIORITY: Record<PermissionSource, number> = {
   flagSettings: 1,
   policySettings: 2,
   managed: 3,
-  project: 4,
-  user: 5,
-  session: 6,
+  // Session decisions should override user/project settings during the running process.
+  session: 4,
+  project: 5,
+  user: 6,
   default: 7,
 };
 

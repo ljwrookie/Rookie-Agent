@@ -7,6 +7,7 @@ import { RookieError, ErrorCode } from "../errors.js";
 import { McpClient } from "../mcp/client.js";
 import { McpServerConfig } from "../mcp/types.js";
 import { StdioMcpTransport } from "../mcp/stdio-transport.js";
+import { registerMcpClient, unregisterMcpClient } from "./builtin/mcp_resources.js";
 
 /**
  * Host-provided approval callback. Returning a boolean keeps the v1 contract
@@ -264,6 +265,9 @@ export class ToolRegistry {
         const client = await this.connectMcpServer(serverName, config);
         if (!client) continue;
 
+        // Expose connected clients to MCP resource tools (list/read)
+        registerMcpClient(serverName, client);
+
         const tools = client.getTools();
         for (const mcpTool of tools) {
           // Register with prefixed name: mcp__{server}__{tool}
@@ -333,6 +337,7 @@ export class ToolRegistry {
   async shutdown(): Promise<void> {
     for (const [name, client] of this.mcpClients) {
       try {
+        unregisterMcpClient(name);
         await client.disconnect();
       } catch (e) {
         // Log but don't throw during shutdown

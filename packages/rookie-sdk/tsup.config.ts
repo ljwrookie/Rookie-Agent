@@ -7,4 +7,6 @@ export default defineConfig({
   splitting: false,
   sourcemap: true,
   clean: true,
+  // Optional peer dependency loaded lazily at runtime.
+  external: ["form-data"],
 });

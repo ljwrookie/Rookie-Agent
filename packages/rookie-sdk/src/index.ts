@@ -127,7 +127,8 @@ export {
   getRecordedMtime,
   clearRecordedMtime,
 } from "./tools/builtin/edit.js";
-export { globFilesTool, grepFilesTool, globToRegExp } from "./tools/builtin/glob.js";
+export { globFilesTool, globToRegExp } from "./tools/builtin/glob.js";
+export { grepFilesTool } from "./tools/builtin/grep.js";
 export {
   webFetchTool,
   createWebFetchTool,
@@ -249,12 +250,21 @@ export { OpenAIProvider, type OpenAIConfig } from "./models/providers/openai.js"
 export { AnthropicProvider, type AnthropicConfig } from "./models/providers/anthropic.js";
 export { OpenRouterProvider, type OpenRouterConfig } from "./models/providers/openrouter.js";
 export {
+  PROVIDER_REGISTRY,
+  type ProviderName,
+} from "./models/providers/index.js";
+export {
   ModelRouter, type TaskType, type RoutingStrategy,
   DefaultStrategy, CostAwareStrategy, FallbackStrategy,
 } from "./models/router.js";
+export {
+  HealthRegistry, ProviderHealth,
+  type HealthMetrics, type HealthCheckOptions, type RequestRecord,
+  type CircuitState,
+} from "./models/health.js";
 
 // Skills (Phase 2: SKILL.md + SkillLearner)
-export { SkillRegistry } from "./skills/registry.js";
+export { SkillRegistry, type SkillRegistryOptions } from "./skills/registry.js";
 export {
   type Skill, type SkillManifest, type Trigger, type Example, type CompletedTask,
   type SkillMdFrontmatter, type SkillMd,
@@ -262,6 +272,36 @@ export {
 } from "./skills/types.js";
 export { SkillLoader } from "./skills/loader.js";
 export { SkillLearner, type SkillRewriteCandidate } from "./skills/learner.js";
+// P8-T1: Semantic Skill Matcher
+export {
+  SemanticSkillMatcher,
+  skillToEntry,
+  exportEmbeddings,
+  type SemanticMatchResult,
+  type MatcherConfig,
+  type SkillEmbeddings,
+} from "./skills/matcher.js";
+// P8-T4: Skill Manifest & Installer
+export {
+  ManifestValidator,
+  createManifest,
+  skillToManifest,
+  manifestToSkill,
+  updateManifestVersion,
+  type SkillManifestV1,
+  type ValidationResult,
+  type ValidationError,
+  type ValidationWarning,
+} from "./skills/manifest.js";
+export {
+  SkillInstaller,
+  type InstallOptions,
+  type InstallResult,
+  type InstalledSkill,
+  createInstallCommand,
+  createListCommand,
+  createRemoveCommand,
+} from "./skills/installer.js";
 
 // Agent
 export type { RunReActOptions } from "./agent/react.js";
@@ -391,7 +431,7 @@ export {
   type PermissionErrorCode,
 } from "./permissions/types.js";
 
-// User Model (P2-T4: third-layer memory)
+// User Model (P2-T4: third-layer memory + P8-T2: LLM Reflector)
 export {
   UserModelManager,
   SimpleReflector,
@@ -406,17 +446,32 @@ export {
   type ReflectorAgent,
   type UserModelOptions,
 } from "./memory/user-model.js";
+export {
+  LLMReflector,
+  ReflectorFactory,
+  IncrementalReflector,
+  type DialecticalAnalysis,
+  type UserHypothesis,
+  type CounterEvidence,
+  type SynthesisResult,
+  type LLMReflectorConfig,
+  type ReflectorType,
+  type ReflectorFactoryConfig,
+  type IncrementalUpdate,
+} from "./memory/llm-reflector.js";
 
 // Config
 export { ConfigManager, type RookieConfig, type ModelConfig } from "./config.js";
 export {
   loadSettings,
+  saveSettings,
   resolveSettingsPaths,
   deepMerge,
   type RookieSettings,
   type SettingsPaths,
   type SettingsLayer,
   type LoadSettingsOptions,
+  type SaveSettingsOptions,
   type LoadedLayer,
   type MergedSettings,
 } from "./config/settings.js";
@@ -443,10 +498,10 @@ export {
   type NapiTransportOptions,
   type NapiRequest,
   type NapiResponse,
-  type NapiAddon,
   type TransportFactoryOptions,
   type TransportBenchmark,
 } from "./transport/napi.js";
+export { type RookieNapiAddon as NapiAddon } from "./transport/napi-types.js";
 
 // Gateway (P3-T2: Multi-platform)
 export {
@@ -467,5 +522,65 @@ export {
   type FeishuMessageEvent,
 } from "./gateway/feishu.js";
 
+// Voice (TTS/STT)
+export {
+  VoiceManager,
+  getVoiceManager,
+  getTTSEngine,
+  getSTTEngine,
+  textToSpeech,
+  speechToText,
+  speechToTextBuffer,
+  type TTSOptions,
+  type STTOptions,
+  type TTSResult,
+  type STTResult,
+  type TTSProvider,
+  type STTProvider,
+  type VoiceConfig,
+} from "./tools/voice/index.js";
+
 // Utils
 export { resolveCoreBinary } from "./utils/binary.js";
+
+// P8-T3: Plugin System
+export {
+  PluginContextImpl,
+  globalPluginLogger,
+  HookExecutorImpl,
+  PermissionDeniedError,
+  type HookExecutor,
+  type VetoResult,
+} from "./plugins/api.js";
+export { type PluginContext } from "./plugins/types.js";
+export {
+  PluginLoader,
+  PluginLoadError,
+  type PluginLoaderOptions,
+  type LoadedPlugin,
+} from "./plugins/loader.js";
+export {
+  telemetryPlugin,
+  gitIntegrationPlugin,
+  autoSavePlugin,
+} from "./plugins/builtin/index.js";
+export type {
+  Plugin,
+  PluginMeta,
+  PluginConfig,
+  PluginPermission,
+  CommandDefinition,
+  CommandContext,
+  HookDefinition,
+  HookContext as PluginHookContext,
+  PluginManifest,
+  SandboxOptions,
+  SandboxedPlugin,
+  PluginRegistryEvents,
+  PluginLogger,
+  PluginApi,
+  EventHandler,
+  EventMeta,
+  ArgSchema,
+  OptionSchema,
+} from "./plugins/types.js";
