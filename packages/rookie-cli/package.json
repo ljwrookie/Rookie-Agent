@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "@rookie/agent-sdk": "workspace:*",
-    "commander": "^12",
+    "commander": "^14",
     "ink": "^7.0.1",
     "react": "^19.2.5",
     "wrap-ansi": "^10.0.0"
