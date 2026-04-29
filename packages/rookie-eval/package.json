@@ -17,9 +17,9 @@
     "commander": "^12"
   },
   "devDependencies": {
-    "typescript": "^5.5",
+    "typescript": "^6.0",
     "tsup": "^8",
-    "vitest": "^2",
-    "@types/node": "^22"
+    "vitest": "^4",
+    "@types/node": "^25"
   }
 }
