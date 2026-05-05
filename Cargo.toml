@@ -30,6 +30,6 @@ napi-derive = "3.0.0-alpha"
 napi-build = "2"
 tiktoken-rs = "0.6"
 # P7: Scheduler & Blackboard
-cron = "0.15"
+cron = "0.16"
 async-trait = "0.1"
 uuid = { version = "1", features = ["v4"] }
