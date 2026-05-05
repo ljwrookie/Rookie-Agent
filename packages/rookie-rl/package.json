@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@rookie/agent-sdk": "workspace:*",
-    "openai": "^4.20.0",
+    "openai": "^6.36.0",
     "wandb": "^0.1.0",
     "zod": "^3.22.0"
   },
