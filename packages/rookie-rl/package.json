@@ -14,7 +14,7 @@
     "@rookie/agent-sdk": "workspace:*",
     "openai": "^4.20.0",
     "wandb": "^0.1.0",
-    "zod": "^3.22.0"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
