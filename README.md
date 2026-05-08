@@ -116,10 +116,10 @@ rookie code --model claude-3-7-sonnet
 
 ### Documentation
 
-- [Getting Started Guide](https://rookie-agent.dev/guide/)
-- [API Reference](https://rookie-agent.dev/api/)
-- [Examples](https://rookie-agent.dev/examples/)
-- [Configuration](https://rookie-agent.dev/guide/settings.html)
+- [Getting Started Guide](./docs/guide/quick-start.md)
+- [API Reference](./docs/api/index.md)
+- [Examples](./docs/examples/index.md)
+- [Configuration](./docs/guide/settings.md)
 
 ### Contributing
 
@@ -235,10 +235,10 @@ rookie code --model claude-3-7-sonnet
 
 ### 文档
 
-- [快速入门指南](https://rookie-agent.dev/guide/)
-- [API 参考](https://rookie-agent.dev/api/)
-- [示例](https://rookie-agent.dev/examples/)
-- [配置说明](https://rookie-agent.dev/guide/settings.html)
+- [快速入门指南](./docs/guide/quick-start.md)
+- [API 参考](./docs/api/index.md)
+- [示例](./docs/examples/index.md)
+- [配置说明](./docs/guide/settings.md)
 
 ### 贡献指南
 
