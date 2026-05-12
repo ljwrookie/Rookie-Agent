@@ -21,10 +21,10 @@
     "wrap-ansi": "^10.0.0"
   },
   "devDependencies": {
-    "@types/node": "^22",
+    "@types/node": "^25",
     "@types/react": "^19.2.14",
     "tsup": "^8",
-    "typescript": "^5.5",
-    "vitest": "^2"
+    "typescript": "^6.0",
+    "vitest": "^4"
   }
 }
